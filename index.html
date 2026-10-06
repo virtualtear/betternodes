@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>betternodes demo</title>
+  <link rel="stylesheet" href="/src/style.css">
+  <style>
+    body { margin: 0; height: 100vh; display: flex; flex-direction: column; font: 14px system-ui, sans-serif; }
+    header { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #ddd; }
+    #app { flex: 1; }
+    #fps { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    /* Demo-only status styling for nodes tagged with .class(). */
+    .bn-node.ok { box-shadow: 0 0 0 2px #30a46c; }
+    .bn-node.error { box-shadow: 0 0 0 2px #e5484d; }
+    .bn-node.busy { box-shadow: 0 0 0 2px #f5a524; }
+    .bn-node.photo { cursor: pointer; }
+    .photo-card { padding: 0 12px 10px; }
+    .photo-card img { display: block; border-radius: 4px; background: #e8eaed; }
+    .photo-card p { margin: 6px 0 0; color: #666; font-size: 12px; }
+    .bn-packet.photo-packet { fill: #3e63dd; }
+    #events { height: 160px; display: flex; flex-direction: column; border-top: 1px solid #ddd; }
+    #events-bar { display: flex; justify-content: space-between; align-items: center; padding: 4px 12px; background: #f6f7f9; font-weight: 600; }
+    #log { flex: 1; overflow: auto; margin: 0; padding: 4px 12px; list-style: none; font: 12px/1.6 ui-monospace, monospace; }
+    #log time { color: #888; }
+    #log b { display: inline-block; width: 8ch; margin-left: 1ch; }
+    #log .change { color: #30a46c; }
+    #log .select { color: #ff6d5a; }
+    #log .send { color: #3e63dd; }
+  </style>
+</head>
+<body>
+  <header>
+    <button id="mode">Edit</button>
+    <button id="undo">Undo</button>
+    <button id="redo">Redo</button>
+    <button id="send">Send</button>
+    <button id="run" aria-pressed="false">Run</button>
+    <button id="layout">Layout</button>
+    <button id="fit">Fit</button>
+    <button id="reset">Reset saved state</button>
+    <span>Edit mode: click a wire or node, Shift+click or Shift+drag for more, then Delete. Drag to an edge to scroll. Ctrl+Z / Ctrl+Shift+Z. <code>?n=1000</code> for a stress test.</span>
+    <output id="selection"></output>
+    <output id="fps" title="Frames per second over the last half second, and the slowest frame in it">- fps</output>
+  </header>
+  <div id="app"></div>
+  <div id="events">
+    <div id="events-bar">Events <button id="clear">Clear</button></div>
+    <ol id="log"></ol>
+  </div>
+  <script type="module">
+    import { flow } from '/src/index.ts'
+
+    const n = Number(new URLSearchParams(location.search).get('n'))
+    const key = `betternodes-demo-v4-${n || 'sample'}`
+    const f = flow(document.getElementById('app'))
+
+    // Event console, newest line on top, capped at 200 lines.
+    const log = document.getElementById('log')
+    const write = (type, text) => {
+      const time = document.createElement('time')
+      time.textContent = new Date().toTimeString().slice(0, 8)
+      const name = document.createElement('b')
+      name.className = type
+      name.textContent = type
+      const line = document.createElement('li')
+      line.append(time, name, text)
+      log.prepend(line)
+      log.children[200]?.remove()
+    }
+    document.getElementById('clear').onclick = () => log.replaceChildren()
+
+    if (n) {
+      // Grid of n nodes, each wired to its right-hand neighbour.
+      const cols = Math.ceil(Math.sqrt(n))
+      for (let i = 0; i < n; i++) {
+        f.node(`n${i}`).title(`Node ${i}`).at((i % cols) * 240, Math.floor(i / cols) * 120)
+        if (i % cols) f.connect(`n${i - 1}.e`, `n${i}.w`)
+      }
+    } else {
+      const note = document.createElement('p')
+      note.style.cssText = 'margin: 0; padding: 6px 12px; color: #666; max-width: 180px'
+      note.textContent = 'Custom content: any element, from any framework.'
+
+      // No at(): auto-layout places these. Bare ids make floating wire ends.
+      f.node('hook').title('Webhook').class('ok')
+      f.node('if').title('IF').class('ok')
+      f.node('mail').title('Send mail').content(note).class('error')
+      f.node('log').title('Log')
+      f.connect('hook', 'if').connect('if', 'mail', { label: 'true' }).connect('if', 'log', { label: 'false' })
+
+      // Image service: custom content that changes at runtime. Clicking the node swaps in another
+      // photo. Photos differ in size on purpose: the node resizes, its wires re-route, and a
+      // neighbour it grows into moves aside.
+      const photo = (id, w, h) => ({ src: `https://picsum.photos/id/${id}/${w}/${h}`, w, h })
+      const photos = [photo(1025, 200, 140), photo(1015, 240, 120), photo(1043, 160, 200), photo(1069, 200, 200), photo(237, 220, 150)]
+      const img = document.createElement('img')
+      img.draggable = false // a native image drag would cancel the pan or node drag
+      const caption = document.createElement('p')
+      const card = document.createElement('div')
+      card.className = 'photo-card'
+      card.append(img, caption)
+
+      let shown = -1
+      let swapped = false
+      const show = i => {
+        shown = i
+        Object.assign(img, { src: photos[i].src, width: photos[i].w, height: photos[i].h, alt: `Photo ${i + 1}` })
+        caption.textContent = `Photo ${i + 1} of ${photos.length}. Click to swap.`
+        f.node('image').class('photo', 'busy')
+      }
+      img.onload = () => {
+        f.node('image').class('photo', 'ok')
+        // Once a swapped-in photo is in, a packet carries it downstream.
+        if (swapped) f.send('image', undefined, { class: 'photo-packet' }).then(reached => write('send', `image reached ${JSON.stringify(reached)}`))
+      }
+      img.onerror = () => f.node('image').class('photo', 'error')
+
+      f.node('image').title('Image service').content(card)
+      show(0)
+      // A fixed end on the image node's east side; the log end stays floating.
+      f.connect('hook', 'image', { label: 'photo' }).connect('image.e', 'log')
+
+      // The browser also fires click after a pan or node drag that ends on the node, so only
+      // presses that barely moved count. Shift+click and anchor drags belong to the editor.
+      const app = document.getElementById('app')
+      let press = [0, 0]
+      app.addEventListener('pointerdown', e => (press = [e.clientX, e.clientY]))
+      app.addEventListener('click', e => {
+        if (e.shiftKey || Math.hypot(e.clientX - press[0], e.clientY - press[1]) >= 4) return
+        if (!e.target.closest('.bn-node.photo') || e.target.closest('.bn-anchor')) return
+        // Any photo but the one shown.
+        swapped = true
+        show((shown + 1 + Math.floor(Math.random() * (photos.length - 1))) % photos.length)
+      })
+    }
+
+    f.load(JSON.parse(localStorage.getItem(key) ?? 'null'))
+    f.on('change', state => localStorage.setItem(key, JSON.stringify(state)))
+    const selection = document.getElementById('selection')
+    f.on('select', ({ nodes, wire }) => {
+      selection.textContent = wire ? `wire ${wire.join(' → ')}` : nodes.length ? `${nodes.length} selected` : ''
+    })
+    // Empty diff fields are left out, so each line shows only what the edit did.
+    const compact = diff => Object.fromEntries(Object.entries(diff).filter(([, v]) => Object.keys(v).length))
+    f.on('change', (_, diff) => write('change', JSON.stringify(compact(diff))))
+    f.on('select', selection => write('select', JSON.stringify(selection)))
+
+    let mode = 'view'
+    document.getElementById('mode').onclick = e => {
+      mode = mode === 'view' ? 'edit' : 'view'
+      f.mode(mode)
+      e.target.textContent = mode === 'view' ? 'Edit' : 'View'
+    }
+    // Packets: Send floods the graph once from its first node, Run keeps sending every second.
+    window.f = f
+    const first = n ? 'n0' : 'hook'
+    document.getElementById('send').onclick = () => f.send(first).then(reached => write('send', `${first} reached ${JSON.stringify(reached)}`))
+    let timer = 0
+    document.getElementById('run').onclick = e => {
+      if (timer) {
+        clearInterval(timer)
+        timer = 0
+      } else timer = setInterval(() => f.send(first), 1000)
+      e.target.setAttribute('aria-pressed', String(!!timer))
+      e.target.textContent = timer ? 'Stop' : 'Run'
+    }
+    document.getElementById('undo').onclick = () => f.undo()
+    document.getElementById('redo').onclick = () => f.redo()
+    // layout() emits no change event, so persist the new positions here.
+    document.getElementById('layout').onclick = () => localStorage.setItem(key, JSON.stringify(f.layout().fit().state()))
+    document.getElementById('fit').onclick = () => f.fit()
+
+    // Frame rate the browser actually delivers, plus the slowest frame, so a single hitch shows too.
+    const fps = document.getElementById('fps')
+    let [frames, since, prev, slowest] = [0, performance.now(), performance.now(), 0]
+    requestAnimationFrame(function tick(now) {
+      frames++
+      slowest = Math.max(slowest, now - prev)
+      prev = now
+      if (now - since >= 500) {
+        fps.textContent = `${Math.round((frames * 1000) / (now - since))} fps, slowest ${Math.round(slowest)} ms`
+        ;[frames, since, slowest] = [0, now, 0]
+      }
+      requestAnimationFrame(tick)
+    })
+    document.getElementById('reset').onclick = () => {
+      localStorage.removeItem(key)
+      location.reload()
+    }
+  </script>
+</body>
+</html>
