@@ -1,0 +1,140 @@
+.bn {
+  --bn-bg: #f6f7f9;
+  --bn-grid: #dde1e6;
+  --bn-node-bg: #fff;
+  --bn-node-border: #c9ced6;
+  --bn-text: #1f2328;
+  --bn-accent: #ff6d5a;
+  --bn-wire: #9aa3ae;
+  --bn-packet: var(--bn-accent);
+  --bn-radius: 8px;
+  --bn-anchor: 10px;
+
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  background: var(--bn-bg) radial-gradient(var(--bn-grid) 1px, transparent 1px) 0 0 / 20px 20px;
+  color: var(--bn-text);
+  font: 13px/1.4 system-ui, sans-serif;
+}
+
+.bn-world {
+  position: absolute;
+  inset: 0 auto auto 0;
+  transform-origin: 0 0;
+}
+
+.bn-wires {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.bn-wire,
+.bn-preview {
+  fill: none;
+  stroke: var(--bn-wire);
+  stroke-width: 2;
+}
+
+.bn-preview {
+  stroke: var(--bn-accent);
+  stroke-dasharray: 6 4;
+}
+
+.bn-wire { marker-end: url(#bn-arrow); }
+.bn-arrow { fill: context-stroke; }
+.bn-selected .bn-wire { stroke: var(--bn-accent); }
+.bn-packet { fill: var(--bn-packet); }
+.bn-drop { animation: bn-drop 200ms forwards; }
+@keyframes bn-drop { to { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .bn-drop { animation: none; opacity: 0; }
+}
+.bn-lifted { display: none; }
+.bn-node.bn-selected { outline: 2px solid var(--bn-accent); outline-offset: 2px; }
+
+/* Selection box, drawn in screen space so its border stays 1px at any zoom. */
+.bn-band {
+  position: absolute;
+  inset: 0 auto auto 0;
+  box-sizing: border-box;
+  border: 1px dashed var(--bn-accent);
+  background: color-mix(in srgb, var(--bn-accent) 8%, transparent);
+  pointer-events: none;
+}
+
+/* Wide invisible stroke that makes wires easy to grab in edit mode. */
+.bn-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+}
+
+.bn[data-mode='edit'] .bn-hit {
+  pointer-events: stroke;
+  cursor: move;
+}
+
+/* Wire notes. A halo in the background colour keeps them readable where they cross the wire. */
+.bn-label {
+  fill: var(--bn-text);
+  font-size: 12px;
+  text-anchor: middle;
+  dominant-baseline: central;
+  paint-order: stroke;
+  stroke: var(--bn-bg);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+.bn-label.bn-selected { fill: var(--bn-accent); }
+
+.bn[data-mode='edit'] .bn-label {
+  pointer-events: visiblePainted;
+  cursor: move;
+}
+
+.bn-node {
+  position: absolute;
+  inset: 0 auto auto 0;
+  min-width: 160px;
+  background: var(--bn-node-bg);
+  border-radius: var(--bn-radius);
+  /* Ring instead of border, so anchors at 0%/100% sit exactly on the node's edge. */
+  box-shadow: 0 0 0 1px var(--bn-node-border), 0 1px 3px #0001;
+}
+
+.bn-title {
+  padding: 8px 12px;
+  font-weight: 600;
+}
+
+.bn-anchor {
+  position: absolute;
+  width: var(--bn-anchor);
+  height: var(--bn-anchor);
+  translate: -50% -50%;
+  border: 2px solid var(--bn-accent);
+  border-radius: 50%;
+  background: var(--bn-node-bg);
+  box-sizing: border-box;
+  opacity: 0;
+  cursor: crosshair;
+}
+
+/* Bigger invisible hit area, so anchors are easy to grab and drop on. */
+.bn-anchor::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+
+/* visibility, not display: toggling modes then repaints instead of laying out every anchor. */
+.bn[data-mode='view'] .bn-anchor,
+.bn-far .bn-anchor { visibility: hidden; }
+.bn-node:hover .bn-anchor { opacity: 1; }
+.bn-anchor:hover { background: var(--bn-accent); }
+.bn[data-mode='edit'] .bn-node { cursor: grab; }
