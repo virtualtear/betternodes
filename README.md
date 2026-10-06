@@ -57,12 +57,18 @@ f.connect('hook', 'mail', { label: 'new order' })
 betternodes is not on npm yet. Install it straight from GitHub:
 
 ```sh
-npm install github:virtualtear/betternodes
+npm install --allow-git=root github:virtualtear/betternodes#v0.1.0
 ```
 
-npm clones the repository and runs its `prepare` script, which builds `dist/`. That build needs
-Node.js 20.19+ or 22.12+. Append `#<tag or commit>` to the URL to pin a version, for example
-`github:virtualtear/betternodes#v0.1.0`.
+npm 12 and later refuse git dependencies unless you allow them; `--allow-git=root` allows the ones
+you list in your own `package.json`. To skip the flag on every install, put `allow-git=root` in
+your project's `.npmrc`. Older npm versions don't need the flag.
+
+npm clones the tag and runs its `prepare` script, which builds `dist/`. That build needs Node.js
+20.19+ or 22.12+. npm 12 may then warn that the `prepare` script of betternodes was blocked by
+`allowScripts`; the package is already built at that point, so you can ignore the warning. Use
+another tag or a commit hash after `#` to pick a different version, or leave it off for the latest
+`main`.
 
 The package ships one ES module with TypeScript declarations, and one stylesheet you import
 yourself:
