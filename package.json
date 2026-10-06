@@ -1,0 +1,50 @@
+{
+  "name": "betternodes",
+  "version": "0.1.0",
+  "description": "Framework-agnostic node graph viewer and editor",
+  "keywords": [
+    "node-graph",
+    "flow",
+    "diagram",
+    "editor",
+    "graph-editor",
+    "svg",
+    "framework-agnostic"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/virtualtear/betternodes.git"
+  },
+  "homepage": "https://github.com/virtualtear/betternodes#readme",
+  "bugs": "https://github.com/virtualtear/betternodes/issues",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./style.css": "./dist/style.css"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": [
+    "*.css"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && tsc -p tsconfig.build.json && node -e \"require('fs').copyFileSync('src/style.css', 'dist/style.css')\"",
+    "prepare": "npm run build",
+    "test": "tsc -p . && vitest run",
+    "test:watch": "vitest",
+    "bench": "vitest run --config vitest.bench.config.ts --reporter=verbose"
+  },
+  "devDependencies": {
+    "@vitest/browser-playwright": "^5.0.3",
+    "playwright": "^1.63.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
+  }
+}
