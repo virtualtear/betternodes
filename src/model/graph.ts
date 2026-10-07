@@ -77,6 +77,8 @@ export class Graph {
   // Notes on wires, by `from>to` key, set from code. They outlive their wire, so a wire that undo
   // or load() brings back gets its note back too.
   labels = new Map<string, string>()
+  // Extra CSS classes on wires, by `from>to` key, set from code; they outlive their wire like notes.
+  classes = new Map<string, string[]>()
   /** Bumped on every change to wires or nodes, so derived lookups know when to rebuild. */
   version = 0
 
@@ -127,10 +129,17 @@ export class Graph {
     return true
   }
 
-  /** Sets the note on the wire `from` -> `to`; no text removes it. */
+  /** Sets the note on the wire from `from` to `to`; no text removes it. */
   label(from: string, to: string, text?: string) {
     if (text) this.labels.set(`${from}>${to}`, text)
     else this.labels.delete(`${from}>${to}`)
+    this.version++
+  }
+
+  /** Sets the extra CSS classes of the wire from `from` to `to`, replacing earlier ones; none clears them. */
+  classify(from: string, to: string, names: string[]) {
+    if (names.length) this.classes.set(`${from}>${to}`, [...names])
+    else this.classes.delete(`${from}>${to}`)
     this.version++
   }
 

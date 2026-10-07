@@ -36,10 +36,13 @@ export function anchorDots(node: string) {
   })
 }
 
-/** `<defs>` with the arrowhead for wire targets. Every flow on a page defines the same id; any copy will do. */
+/**
+ * `<defs>` with the arrowhead for wire targets; it also fits wire starts (`marker-start`), pointing
+ * backwards. Every flow on a page defines the same id; any copy will do.
+ */
 export function arrowDefs() {
   const defs = svg('defs')
   defs.innerHTML = '<marker id="bn-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse"'
-    + ' markerWidth="10" markerHeight="10" orient="auto"><path class="bn-arrow" d="M0 0L10 5L0 10z"/></marker>'
+    + ' markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path class="bn-arrow" d="M0 0L10 5L0 10z"/></marker>'
   return defs
 }

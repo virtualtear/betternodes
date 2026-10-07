@@ -475,3 +475,34 @@ test('edit mode: a node dragged while zooming stays under the pointer', async ()
   expect(Math.abs(at.y - to.y)).toBeLessThan(16)
   pointer('pointerup', to)
 })
+
+test('edit mode: Ctrl+A selects every node', async () => {
+  const { el, f } = await setup('edit')
+  press(el, 'a', { ctrlKey: true })
+  expect(f.selection().nodes.toSorted()).toEqual(['a', 'b', 'c'])
+})
+
+test('edit mode: arrow keys move the selected nodes one grid step per press, each one edit', async () => {
+  const { el, f, changes } = await setup('edit')
+  await click(title(el, 'a'))
+  press(el, 'ArrowRight')
+  press(el, 'ArrowDown')
+  expect(f.state().positions.a).toEqual([40, 40])
+  expect(changes).toHaveBeenCalledTimes(2)
+  f.undo()
+  expect(f.state().positions.a).toEqual([40, 20])
+})
+
+test('edit mode: a node nudged onto another settles next to it', async () => {
+  const { el, f } = await setup('edit')
+  f.node('a').at(140, 20) // b's left edge is at 320; a is 160 wide
+  await frame()
+  await click(title(el, 'a'))
+  press(el, 'ArrowRight')
+  press(el, 'ArrowRight')
+  await frame()
+  expect(f.state().positions.a).not.toEqual([180, 20]) // where two plain steps would put it, on b
+  const a = el.querySelector('[data-node="a"]')!.getBoundingClientRect()
+  const b = el.querySelector('[data-node="b"]')!.getBoundingClientRect()
+  expect(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top).toBe(true)
+})

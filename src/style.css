@@ -44,6 +44,9 @@
 }
 
 .bn-wire { marker-end: url(#bn-arrow); }
+/* Arrowhead variants, on single wires (wireClass) or on the root for every wire. */
+.bn-two-way .bn-wire { marker-start: url(#bn-arrow); }
+.bn-no-arrow .bn-wire { marker-start: none; marker-end: none; }
 .bn-arrow { fill: context-stroke; }
 .bn-selected .bn-wire { stroke: var(--bn-accent); }
 .bn-packet { fill: var(--bn-packet); }
@@ -66,17 +69,15 @@
   pointer-events: none;
 }
 
-/* Wide invisible stroke that makes wires easy to grab in edit mode. */
+/* Wide invisible stroke that makes wires easy to grab in edit mode, and to click in both modes. */
 .bn-hit {
   fill: none;
   stroke: transparent;
   stroke-width: 12;
+  pointer-events: stroke;
 }
 
-.bn[data-mode='edit'] .bn-hit {
-  pointer-events: stroke;
-  cursor: move;
-}
+.bn[data-mode='edit'] .bn-hit { cursor: move; }
 
 /* Wire notes. A halo in the background colour keeps them readable where they cross the wire. */
 .bn-label {
@@ -88,14 +89,12 @@
   stroke: var(--bn-bg);
   stroke-width: 4px;
   stroke-linejoin: round;
+  pointer-events: visiblePainted;
 }
 
 .bn-label.bn-selected { fill: var(--bn-accent); }
 
-.bn[data-mode='edit'] .bn-label {
-  pointer-events: visiblePainted;
-  cursor: move;
-}
+.bn[data-mode='edit'] .bn-label { cursor: move; }
 
 .bn-node {
   position: absolute;

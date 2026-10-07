@@ -55,10 +55,14 @@ export class View {
   private panned = false
   // Set in the constructor from the `fit` option, so the first render shows the whole graph.
   private fitting: boolean
+  // Nodes the pending fit shows; undefined for all of them.
+  private fitIds?: string[]
   // Packets ride above the wires but below the nodes, so they slide into a node when they arrive.
   private packets = svg('g')
   /** Runs at the end of every frame, after wires got this frame's geometry. */
   onFrame?: (now: number) => void
+  /** Runs once per frame in which the pan offset or zoom changed. */
+  onViewport?: () => void
   private ghost?: { fixed: string; to: Point; hide?: string }
   private lifted: Element[] = []
   private highlighted: Element[] = []
@@ -128,11 +132,19 @@ export class View {
     this.update()
   }
 
-  /** Sets pan offset and zoom, applied on the next frame. */
+  /** Sets pan offset and zoom, applied on the next frame; cancels a pending fit. */
   viewport(x: number, y: number, k: number) {
     Object.assign(this, { x, y, k })
     this.panned = true
+    this.fitting = false
     this.update()
+  }
+
+  /** Zooms to `k`, clamped to the zoom options, keeping the point at screen px `px`, `py` in place. */
+  zoomAt(px: number, py: number, k: number) {
+    k = Math.min(this.settings.maxZoom, Math.max(this.settings.minZoom, k))
+    const ratio = k / this.k
+    this.viewport(px - (px - this.x) * ratio, py - (py - this.y) * ratio, k)
   }
 
   /** Re-runs auto-layout for every node now, with freshly measured sizes, instead of next frame. */
@@ -145,9 +157,13 @@ export class View {
     this.flush(performance.now())
   }
 
-  /** Zooms (never past 100%, never below `minZoom`) and pans so every node is visible, on the next frame. */
-  fit() {
+  /**
+   * Zooms (never past 100%, never below `minZoom`) and pans so these nodes, or all of them, are
+   * visible, on the next frame.
+   */
+  fit(ids?: string[]) {
     this.fitting = true
+    this.fitIds = ids
     this.update()
   }
 
@@ -253,12 +269,13 @@ export class View {
     for (const id of this.stale) if (this.measure(id)) this.moved.add(id)
     this.autoLayout()
     this.pullApart()
-    if (this.fitting) this.fitAll()
+    const fitted = this.fitting && this.fitAll()
     this.wires.render(this.moved, this.dragging)
     this.renderOverlays()
     this.dirty.clear()
     this.moved.clear()
     this.stale.clear()
+    if (this.panned || fitted) this.onViewport?.()
     this.panned = false
     this.onFrame?.(now)
   }
@@ -326,11 +343,15 @@ export class View {
   }
 
   // Runs inside flush, after measuring, and applies the viewport right away so nothing flashes.
+  // Returns whether it did; it stays pending while there is nothing to fit.
   private fitAll() {
     const { clientWidth: w, clientHeight: h } = this.root
-    if (!this.graph.nodes.size || !w || !h) return // stays pending until there is something to fit
+    const ids = (this.fitIds ?? [...this.graph.nodes.keys()]).filter(id => this.graph.nodes.has(id))
+    // Fitting nodes that got deleted meanwhile is dropped, not kept for when undo brings them back.
+    if (this.fitIds && !ids.length) this.fitting = false
+    if (!ids.length || !w || !h) return false
     let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity]
-    for (const id of this.graph.nodes.keys()) {
+    for (const id of ids) {
       const [x, y, bw, bh] = this.box(id)
       x0 = Math.min(x0, x)
       y0 = Math.min(y0, y)
@@ -343,6 +364,7 @@ export class View {
     Object.assign(this, { x: (w - (x1 - x0) * k) / 2 - x0 * k, y: (h - (y1 - y0) * k) / 2 - y0 * k, k })
     this.fitting = false
     this.applyViewport()
+    return true
   }
 
   private renderNode(n: NodeDef) {

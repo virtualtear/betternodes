@@ -2,28 +2,21 @@
 export class History<T> {
   private past: T[] = []
   private future: T[] = []
-  private max: number
 
-  constructor(limit = 100) {
-    this.max = limit
-  }
+  constructor(private limit = 100) {}
 
-  /** How many edits can be undone; shrinking it drops the oldest snapshots, 0 disables undo. */
-  get limit() {
-    return this.max
-  }
-
-  set limit(n: number) {
-    this.max = n
-    this.past.splice(0, this.past.length - n)
-    this.future.splice(0, this.future.length - n)
+  /** Changes how many edits can be undone; shrinking drops the oldest snapshots, 0 disables undo. */
+  resize(limit: number) {
+    this.limit = limit
+    this.past.splice(0, this.past.length - limit)
+    this.future.splice(0, this.future.length - limit)
   }
 
   /** Records the snapshot from just before a new edit; clears the redo stack. */
   push(before: T) {
     this.past.push(before)
     // ponytail: whole snapshots; store inverse diffs if they get huge.
-    if (this.past.length > this.max) this.past.shift()
+    if (this.past.length > this.limit) this.past.shift()
     this.future = []
   }
 

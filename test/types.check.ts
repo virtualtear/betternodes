@@ -27,3 +27,17 @@ flow(document.createElement('div'), { zoom: 'no' })
 g.set({ bogus: 1 })
 // @ts-expect-error unknown mode
 g.set({ mode: 'locked' })
+
+g.on('click', (hit, e) => [hit.node, hit.wire?.[0], e.clientX])
+g.on('hover', hit => hit.node)
+g.on('viewport', v => v.zoom).viewport({ zoom: 2 }).zoomBy(1.2).fit('a', 'b')
+const zoom: number = g.viewport().zoom
+g.connect('a.e', 'b.w', { class: 'error' }).wireClass('a.e', 'b.w', 'ok', 'bn-two-way')
+flow(document.createElement('div'), { canConnect: (from, to) => from !== to })
+// @ts-expect-error canConnect must return a boolean
+g.set({ canConnect: () => 'yes' })
+// @ts-expect-error unknown event
+g.on('drag', () => {})
+// @ts-expect-error unknown anchor
+g.wireClass('a.x', 'b', 'ok')
+void zoom

@@ -121,14 +121,9 @@
       // A fixed end on the image node's east side; the log end stays floating.
       f.connect('hook', 'image', { label: 'photo' }).connect('image.e', 'log')
 
-      // The browser also fires click after a pan or node drag that ends on the node, so only
-      // presses that barely moved count. Shift+click and anchor drags belong to the editor.
-      const app = document.getElementById('app')
-      let press = [0, 0]
-      app.addEventListener('pointerdown', e => (press = [e.clientX, e.clientY]))
-      app.addEventListener('click', e => {
-        if (e.shiftKey || Math.hypot(e.clientX - press[0], e.clientY - press[1]) >= 4) return
-        if (!e.target.closest('.bn-node.photo') || e.target.closest('.bn-anchor')) return
+      // Flow clicks never follow a drag. Shift+click and anchor presses belong to the editor.
+      f.on('click', ({ node }, e) => {
+        if (node !== 'image' || e.shiftKey || e.target.closest('.bn-anchor')) return
         // Any photo but the one shown.
         swapped = true
         show((shown + 1 + Math.floor(Math.random() * (photos.length - 1))) % photos.length)
@@ -145,6 +140,7 @@
     const compact = diff => Object.fromEntries(Object.entries(diff).filter(([, v]) => Object.keys(v).length))
     f.on('change', (_, diff) => write('change', JSON.stringify(compact(diff))))
     f.on('select', selection => write('select', JSON.stringify(selection)))
+    for (const type of ['click', 'dblclick']) f.on(type, hit => write(type, JSON.stringify(hit)))
 
     let mode = 'view'
     document.getElementById('mode').onclick = e => {

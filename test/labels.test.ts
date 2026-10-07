@@ -90,3 +90,45 @@ test('a note moves along when the user drags one of its wire\'s ends elsewhere',
   await frame()
   expect(el.querySelector('.bn-label[data-wire="a.e>b.w"]')?.textContent).toBe('yes')
 })
+
+test('wire classes go on the wire and its note, and replace earlier ones', async () => {
+  const el = container()
+  const f = flow(el).mode('edit')
+  f.node('a').at(20, 20)
+  f.node('b').at(320, 140)
+  f.connect('a.e', 'b.w', { label: 'yes', class: 'error' })
+  await frame()
+  const g = el.querySelector('g[data-wire="a.e>b.w"]')!
+  const note = el.querySelector('.bn-label[data-wire="a.e>b.w"]')!
+  expect([g.classList.contains('error'), note.classList.contains('error')]).toEqual([true, true])
+  await click(note) // selected: the wire classes must not wipe bn-selected, nor the other way round
+  f.wireClass('a.e', 'b.w', 'ok', 'slow')
+  await frame()
+  expect([...g.classList].toSorted()).toEqual(['bn-selected', 'ok', 'slow'])
+  f.wireClass('a.e', 'b.w')
+  await frame()
+  expect([...g.classList]).toEqual(['bn-selected'])
+  expect(() => f.wireClass('a.e', 'b.n', 'x')).toThrow(/no wire/)
+})
+
+test('wire classes move with a dragged wire end and come back with undo', async () => {
+  const { el, f } = await setup()
+  f.wireClass('a.e', 'b.w', 'error')
+  await frame()
+  await drag(wirePoint(el, 'a.e>b.w', 'to'), el.querySelector('[data-anchor="b.n"]')!)
+  expect(el.querySelector('g[data-wire="a.e>b.n"]')!.classList.contains('error')).toBe(true)
+  f.undo()
+  await frame()
+  expect(el.querySelector('g[data-wire="a.e>b.w"]')!.classList.contains('error')).toBe(true)
+})
+
+test('bn-two-way and bn-no-arrow change the arrowheads', async () => {
+  const { el, f } = await setup()
+  const path = el.querySelector('[data-wire="a.e>b.w"] .bn-wire')!
+  expect(getComputedStyle(path).markerStart).toBe('none')
+  f.wireClass('a.e', 'b.w', 'bn-two-way')
+  await frame()
+  expect(getComputedStyle(path).markerStart).toContain('bn-arrow')
+  el.classList.add('bn-no-arrow') // on the root it covers every wire
+  expect([getComputedStyle(path).markerStart, getComputedStyle(path).markerEnd]).toEqual(['none', 'none'])
+})

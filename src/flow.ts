@@ -1,7 +1,7 @@
 import { Graph, diff, type Anchor, type Diff, type Edge, type NodeDef, type State } from './model/graph'
 import { History } from './model/history'
 import { settle, type FlowOptions, type Settings } from './options'
-import { attach } from './view/interact'
+import { attach, type Hit } from './view/interact'
 import { Packets, type SendOptions } from './view/packets'
 import { View } from './view/view'
 
@@ -10,6 +10,15 @@ import { View } from './view/view'
  * `'a.x'` fails to compile; non-literal strings pass and are validated at runtime.
  */
 export type End<S extends string> = S extends `${infer Id}.${infer A}` ? (A extends Anchor ? S : `${Id}.${Anchor}`) : S
+
+export type { Hit }
+
+/** Pan offset (where the world origin sits, in screen px from the root's top-left) and zoom factor. */
+export interface Viewport {
+  x: number
+  y: number
+  zoom: number
+}
 
 /** What is selected: any number of nodes, or one wire. */
 export interface Selection {
@@ -75,10 +84,13 @@ export class Flow extends EventTarget {
     this.view = new View(root, this.graph, this.settings)
     this.packets = new Packets(this.view, this.graph)
     this.view.onSelect = () => this.fire('select', this.selection())
+    this.view.onViewport = () => this.fire('viewport', this.viewport())
     this.detach = attach(this.view, this.graph, {
       changed: before => this.commit(before),
       undo: () => this.undo(),
       redo: () => this.redo(),
+      pointer: (type, hit, e) => this.fire(type, hit, e),
+      hover: hit => this.fire('hover', hit),
     })
     this.mode(options.mode ?? 'view')
     this.lock()
@@ -92,7 +104,7 @@ export class Flow extends EventTarget {
    */
   set(options: FlowOptions) {
     Object.assign(this.settings, settle(options, this.settings))
-    this.history.limit = this.settings.history
+    this.history.resize(this.settings.history)
     if (options.mode) this.mode(options.mode)
     this.lock()
     return this
@@ -131,12 +143,14 @@ export class Flow extends EventTarget {
   /**
    * Wires one node anchor to another, e.g. `connect('a.e', 'b.w')`.
    * Anchors: `nw n ne e se s sw w`.
-   * @param options - `label` is a plain-text note shown halfway along the wire.
+   * @param options - `label` is a plain-text note shown halfway along the wire, `class` an extra
+   * CSS class on it, see {@link Flow.wireClass}.
    * @throws if an anchor doesn't exist, both sit on the same node, or the wire exists.
    */
-  connect<F extends string, T extends string>(from: End<F>, to: End<T>, options: { label?: string } = {}) {
+  connect<F extends string, T extends string>(from: End<F>, to: End<T>, options: { label?: string; class?: string } = {}) {
     this.graph.connect(from, to)
     if (options.label) this.graph.label(from, to, options.label)
+    if (options.class) this.graph.classify(from, to, [options.class])
     this.view.update()
     return this
   }
@@ -148,10 +162,29 @@ export class Flow extends EventTarget {
    * @throws if there is no such wire.
    */
   label<F extends string, T extends string>(from: End<F>, to: End<T>, text?: string) {
-    if (!this.graph.edges.has(`${from}>${to}`)) throw new Error(`betternodes: no wire ${from} -> ${to}`)
+    this.wire(from, to)
     this.graph.label(from, to, text)
     this.view.update()
     return this
+  }
+
+  /**
+   * Sets extra CSS classes on a wire, replacing earlier ones; no names clear them. They go on the
+   * wire's `<g>` and its note, e.g. `'error'` for a status, or the built-in `'bn-two-way'` and
+   * `'bn-no-arrow'` arrowheads.
+   * @remarks Like notes they belong to your code, survive deleting the wire, and move with a
+   * wire end the user moves.
+   * @throws if there is no such wire.
+   */
+  wireClass<F extends string, T extends string>(from: End<F>, to: End<T>, ...names: string[]) {
+    this.wire(from, to)
+    this.graph.classify(from, to, names)
+    this.view.update()
+    return this
+  }
+
+  private wire(from: string, to: string) {
+    if (!this.graph.edges.has(`${from}>${to}`)) throw new Error(`betternodes: no wire ${from} -> ${to}`)
   }
 
   /**
@@ -233,6 +266,17 @@ export class Flow extends EventTarget {
    * @remarks Never fires when the selection stayed the same, so calling `select()` from `fn` is safe.
    */
   on(type: 'select', fn: (selection: Selection) => void, options?: { signal?: AbortSignal }): this
+  /**
+   * Subscribes to clicks, double clicks or context menu events on nodes, wires or the background,
+   * in both modes, whatever the options say.
+   * @remarks A click is a press that moved less than 4px, so drags never count. Call
+   * `event.preventDefault()` in a `contextmenu` listener to hide the browser's menu.
+   */
+  on(type: 'click' | 'dblclick' | 'contextmenu', fn: (hit: Hit, event: MouseEvent) => void, options?: { signal?: AbortSignal }): this
+  /** Subscribes to the pointer moving onto another node or wire; `{}` means the background or outside. */
+  on(type: 'hover', fn: (hit: Hit) => void, options?: { signal?: AbortSignal }): this
+  /** Subscribes to pan and zoom changes, whether the user or code made them; at most once per frame. */
+  on(type: 'viewport', fn: (viewport: Viewport) => void, options?: { signal?: AbortSignal }): this
   on(type: string, fn: (...args: never[]) => void, options?: { signal?: AbortSignal }) {
     this.addEventListener(type, e => fn(...(e as CustomEvent<never[]>).detail), options)
     return this
@@ -253,7 +297,7 @@ export class Flow extends EventTarget {
    * @throws if an id is not a node.
    */
   select(...ids: string[]) {
-    for (const id of ids) if (!this.graph.nodes.has(id)) throw new Error(`betternodes: no node "${id}"`)
+    this.known(ids)
     this.view.select(ids)
     return this
   }
@@ -276,11 +320,33 @@ export class Flow extends EventTarget {
   }
 
   /**
-   * Zooms (never past 100%) and pans so the whole graph is visible; also runs on first render
-   * unless the `fit` option is off.
+   * Zooms (never past 100%) and pans so these nodes, or with no ids the whole graph, are visible;
+   * applies on the next frame. Also runs on first render unless the `fit` option is off.
+   * @throws if an id is not a node.
    */
-  fit() {
-    this.view.fit()
+  fit(...ids: string[]) {
+    this.known(ids)
+    this.view.fit(ids.length ? ids : undefined)
+    return this
+  }
+
+  /** The current pan offset and zoom. */
+  viewport(): Viewport
+  /**
+   * Pans and zooms; fields left out keep their value. Cancels the fit of the first render, so a
+   * saved viewport can be restored right after mounting.
+   */
+  viewport(next: Partial<Viewport>): this
+  viewport(next?: Partial<Viewport>) {
+    const { x, y, k } = this.view
+    if (!next) return { x, y, zoom: k }
+    this.view.viewport(next.x ?? x, next.y ?? y, next.zoom ?? k)
+    return this
+  }
+
+  /** Zooms by `factor` (e.g. 1.2 in, 1 / 1.2 out) around the middle of the view, within the zoom options. */
+  zoomBy(factor: number) {
+    this.view.zoomAt(this.root.clientWidth / 2, this.root.clientHeight / 2, this.view.k * factor)
     return this
   }
 
@@ -293,8 +359,12 @@ export class Flow extends EventTarget {
    * @throws if `from` or `to` is not a node.
    */
   send(from: string, to?: string, opts: SendOptions = {}) {
-    for (const id of [from, to]) if (id !== undefined && !this.graph.nodes.has(id)) throw new Error(`betternodes: no node "${id}"`)
+    this.known(to === undefined ? [from] : [from, to])
     return this.packets.send(from, to, opts)
+  }
+
+  private known(ids: string[]) {
+    for (const id of ids) if (!this.graph.nodes.has(id)) throw new Error(`betternodes: no node "${id}"`)
   }
 
   /** Unmounts the graph and removes all listeners from the root element. */

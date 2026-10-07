@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen.svg)
-![Size: 11.1 kB min+gzip](https://img.shields.io/badge/size-11.1%20kB%20min%2Bgzip-informational.svg)
+![Size: 11.9 kB min+gzip](https://img.shields.io/badge/size-11.9%20kB%20min%2Bgzip-informational.svg)
 ![TypeScript](https://img.shields.io/badge/types-TypeScript-3178c6.svg)
 
 A small, framework-agnostic node graph viewer and editor. Define nodes and wires in code with a
@@ -35,7 +35,7 @@ f.connect('hook', 'mail', { label: 'new order' })
 
 ## Features
 
-- **Zero runtime dependencies**, about 11.1 kB minified and gzipped (plus 1.3 kB of CSS).
+- **Zero runtime dependencies**, about 11.9 kB minified and gzipped (plus 1.4 kB of CSS).
 - **Plain DOM and SVG**, so it works with React, Vue, Svelte or no framework at all. Node content
   is any element you hand it.
 - **View and edit modes.** Read-only by default; in edit mode users drag wires between eight
@@ -49,6 +49,8 @@ f.connect('hook', 'mail', { label: 'new order' })
 - **JSON state and diffs** for every user edit, ready to save to `localStorage` or a REST API.
 - **Smooth with 1000+ nodes:** DOM writes are batched into one animation frame, and dragging only
   touches the moved nodes and the wires near them.
+- **Hooks for your UI:** click, double-click, context-menu and hover events on nodes and wires, a
+  viewport API to save and restore pan and zoom, and a `canConnect` check for wires users draw.
 - **Configurable:** turn wheel zoom, panning, selection, editor keys, undo and single edit rights
   on or off, when mounting or any time later.
 - **Typed wire ends:** in TypeScript, `f.connect('a.x', 'b')` fails to compile with a list of the
@@ -142,6 +144,17 @@ the user deletes keeps its note, so undo brings both back, and a wire whose end 
 takes its note along. Wires the user draws have none until you call `f.label()`, e.g. from
 `change`.
 
+Wires take CSS classes the same way, for status colours or arrowheads:
+
+```ts
+f.connect('if', 'log', { class: 'error' })
+f.wireClass('if', 'log', 'error', 'bn-two-way')   // replaces the classes; no names clear them
+```
+
+The classes go on the wire's `<g>` and on its note, and like notes they survive deletion and move
+with a wire end. Two are built in: `bn-two-way` adds an arrowhead at the start, `bn-no-arrow`
+removes both. Put either on the root element to change every wire.
+
 ### Layout and fit
 
 Nodes without an explicit position are laid out automatically in columns that follow the wires.
@@ -150,7 +163,14 @@ and nodes added later go to the right of the existing graph. Positions from `at(
 or from dragging always win. Call `f.layout()` to re-arrange everything.
 
 On the first render the view zooms (never beyond 100%) and pans so the whole graph is visible. Call
-`f.fit()` to do that again later.
+`f.fit()` to do that again later, or `f.fit('a', 'b')` to show just some nodes. To restore where a
+user left off, save `f.viewport()` on the `viewport` event and pass it back right after mounting;
+it replaces the first fit:
+
+```ts
+f.viewport(JSON.parse(localStorage.getItem('view') ?? '{}'))
+f.on('viewport', v => localStorage.setItem('view', JSON.stringify(v)))
+```
 
 ### No overlapping nodes
 
@@ -201,7 +221,7 @@ the node they last left and continue along another route. If no route is left, t
 when the content changes size, the node's wires re-route and a neighbour it grows into moves aside.
 Call `.content()` again to replace the element, or change the element in place.
 
-A node that shows a photo and swaps it on click:
+A node that shows a photo and swaps it on click, see [Events](#events):
 
 ```ts
 const img = document.createElement('img')
@@ -213,11 +233,8 @@ img.onload = () => f.node('image').class('ok')
 img.onerror = () => f.node('image').class('error')
 f.node('image').title('Image service').content(img)
 
-// The browser fires click after a pan or node drag too, so ignore presses that moved.
-let press = [0, 0]
-img.addEventListener('pointerdown', e => (press = [e.clientX, e.clientY]))
-img.addEventListener('click', e => {
-  if (Math.hypot(e.clientX - press[0], e.clientY - press[1]) >= 4) return
+f.on('click', ({ node }) => {
+  if (node !== 'image') return
   f.node('image').class('busy')
   img.src = photos[Math.floor(Math.random() * photos.length)]
 })
@@ -307,6 +324,7 @@ f.set({ mode: 'edit', connect: false, remove: false })
 | `move` | `true` | Edit mode: dragging nodes. When off, dragging a node pans, as in view mode. |
 | `remove` | `true` | Edit mode: deleting nodes and wires with Delete or Backspace. |
 | `snap` | `true` | Snapping dragged nodes to the 20px grid. |
+| `canConnect` | allows all | `(from, to) => boolean`, asked before a wire the user draws or reconnects is made. Ends come as stored: `'node.anchor'`, or a bare id for a floating end. Return false to reject it. |
 
 Options only limit what users can do. Calls from your code, like `f.connect()`, `f.remove()` or
 `f.undo()`, work whatever they say, except that `history: 0` leaves nothing to undo. Mounting or
@@ -336,9 +354,10 @@ defines it. Calling `f.node(id)` for a deleted node does not bring it back; undo
 
 | Method | Description |
 | --- | --- |
-| `f.connect(from, to, { label })` | Adds a wire, optionally with a note. Throws for unknown nodes or anchors, both ends on one node, or a duplicate. |
+| `f.connect(from, to, { label, class })` | Adds a wire, optionally with a note and a CSS class. Throws for unknown nodes or anchors, both ends on one node, or a duplicate. |
 | `f.disconnect(from, to)` | Removes a wire. Throws if it does not exist. |
 | `f.label(from, to, text?)` | Sets the note on a wire, or removes it without `text`. Throws if the wire does not exist. |
+| `f.wireClass(from, to, ...names)` | Sets the wire's CSS classes, replacing earlier ones; no names clear them. Throws if the wire does not exist. |
 
 Ends are `'nodeId.anchor'` or a bare `'nodeId'`. String literals are checked at compile time;
 other strings are validated at runtime.
@@ -375,6 +394,29 @@ Unlike `change`, `select` also fires for changes made in code: `f.select()`, rem
 node, undo, and `f.mode()`, which clears the selection. It never fires when the selection stayed
 the same, so calling `f.select()` from a listener is safe.
 
+### Events
+
+```ts
+f.on('click', ({ node, wire }, event) => {
+  if (node) inspector.show(node)
+})
+f.on('contextmenu', (hit, event) => {
+  event.preventDefault()   // no browser menu
+  menu.open(hit, event.clientX, event.clientY)
+})
+```
+
+| Event | Listener gets | Fires when |
+| --- | --- | --- |
+| `click` | `(hit, event)` | A press and release that moved less than 4px, so drags never count. Fires after the selection it made. |
+| `dblclick`, `contextmenu` | `(hit, event)` | The browser's events of the same name. |
+| `hover` | `(hit)` | The pointer moves onto another node or wire, or off them (`{}`). |
+| `viewport` | `({ x, y, zoom })` | Pan or zoom changed, by the user or by code; at most once per frame. |
+
+`hit` is `{ node }`, `{ wire: [from, to] }`, or `{}` for the background. These events fire in both
+modes and whatever the [options](#options) say, so `select: false` plus `click` lets you build your
+own selection.
+
 ### Everything else
 
 | Method | Description |
@@ -386,7 +428,10 @@ the same, so calling `f.select()` from a listener is safe.
 | `f.on('change', (state, diff) => {}, { signal })` | Called after every user edit, including undo and redo. Never called for changes made in code. The optional `signal` unsubscribes when aborted. |
 | `f.undo()` / `f.redo()` | Reverts or re-applies a user edit and emits `change`. Keeps the last 100 edits unless the `history` option says otherwise. |
 | `f.layout()` | Re-arranges every node (including positioned ones) into columns that follow the wires, using current node sizes. Takes effect immediately, emits no `change`. |
-| `f.fit()` | Zooms and pans so every node is visible. |
+| `f.fit(...ids)` | Zooms and pans so these nodes, or with no ids all of them, are visible. Applies on the next frame. Throws for unknown ids. |
+| `f.viewport()` | The current `{ x, y, zoom }`: where the world origin sits in screen px, and the zoom factor. |
+| `f.viewport({ x?, y?, zoom? })` | Pans and zooms; left-out fields stay. Called right after mounting it replaces the first fit. |
+| `f.zoomBy(factor)` | Zooms around the middle of the view, within `minZoom` and `maxZoom`, e.g. `1.2` in, `1 / 1.2` out. |
 | `f.destroy()` | Removes everything betternodes added to `root`, including listeners. |
 
 Undo restores the state from just before an edit, so changes your code made after that edit are
@@ -394,8 +439,8 @@ reverted too.
 
 ### Exported types
 
-`Flow`, `NodeBuilder`, `FlowOptions`, `State`, `Diff`, `Edge`, `Anchor`, `End`, `Selection` and
-`SendOptions`.
+`Flow`, `NodeBuilder`, `FlowOptions`, `State`, `Diff`, `Edge`, `Anchor`, `End`, `Selection`, `Hit`,
+`Viewport` and `SendOptions`.
 
 ## Editor controls
 
@@ -409,6 +454,8 @@ reverted too.
 | Scroll while dragging | While dragging a node, a wire end or a selection box, move the pointer near the edge of the graph; the view scrolls that way, faster closer to the edge. |
 | New wire | Hover a node, drag from one of its connection points to another node. Points show at 50% zoom or more. |
 | Move a wire end | Press on a wire near the end you want to move and drag it elsewhere. Dropping on empty space puts it back. |
+| Select all | Ctrl+A (Cmd+A on macOS). |
+| Nudge | Arrow keys move the selected nodes one grid step (1px with `snap: false`). Each press is one undo step. |
 | Delete | Select a wire or nodes, then Delete or Backspace. Nodes take their wires with them, and one undo brings them all back. |
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y (Cmd on macOS). |
 
@@ -452,11 +499,13 @@ Override these CSS variables on `.bn` or on your root element:
 
 Nodes are `.bn-node` elements with a `.bn-title`; style them, or the classes you add with
 `.class()`, like any other HTML. Selected nodes and wires get `.bn-selected`, and the selection box
-is a `.bn-band` element. Wire notes are SVG `.bn-label` text with a halo in `--bn-bg`. A packet
+is a `.bn-band` element. Wire notes are SVG `.bn-label` text with a halo in `--bn-bg`. Each wire is
+a `<g data-wire>` holding a `.bn-wire` path, and gets the classes from `wireClass()`. A packet
 sent with `{ class }` gets that class next to `.bn-packet`:
 
 ```css
 .bn-node.error { box-shadow: 0 0 0 2px #e5484d; }
+.error .bn-wire { stroke: #e5484d; }
 .bn-label { font-style: italic; }
 .bn-packet.error { fill: #e5484d; }
 ```

@@ -1,5 +1,5 @@
-import type { Edge, Graph, State } from '../model/graph'
-import { GRID, bounds, overlap, snap, type Rect } from '../geometry/rect'
+import type { Edge, Graph, NodeDef, State } from '../model/graph'
+import { GRID, bounds, overlap, snap, type Point, type Rect } from '../geometry/rect'
 import { freeSpots } from '../layout/untangle'
 import type { View } from './view'
 
@@ -11,6 +11,15 @@ const EDGE = 40
 const EDGE_SPEED = 0.6
 // Pointer travel in screen px below which a press counts as a click.
 const SLOP = 4
+// Arrow keys nudge the selected nodes one step this way.
+const ARROWS = new Map<string, Point>([['ArrowLeft', [-1, 0]], ['ArrowRight', [1, 0]], ['ArrowUp', [0, -1]], ['ArrowDown', [0, 1]]])
+
+/** What a pointer event landed on; all fields absent means the background. */
+export interface Hit {
+  node?: string
+  /** A copy of the wire. */
+  wire?: Edge
+}
 
 // Follows one pointer gesture on window, so moves and the drop register wherever the pointer goes.
 // Avoids setPointerCapture, which would retarget pointerup to the drag source.
@@ -74,10 +83,14 @@ export interface Ops {
   changed(before: State): void
   undo(): void
   redo(): void
+  /** A click (a press that barely moved), double click or context menu event landed on `hit`. */
+  pointer(type: 'click' | 'dblclick' | 'contextmenu', hit: Hit, e: MouseEvent): void
+  /** The pointer moved onto something else; `{}` for the background or outside the graph. */
+  hover(hit: Hit): void
 }
 
 /** Wires pointer and keyboard input on the view's root to the graph; returns a detach function. */
-export function attach(view: View, graph: Graph, { changed, undo, redo }: Ops) {
+export function attach(view: View, graph: Graph, { changed, undo, redo, pointer, hover }: Ops) {
   // Options are read on every event, so Flow.set() takes effect without re-attaching.
   const { root, settings: s } = view
   // Gestures only pan near the border when panning is on.
@@ -85,6 +98,13 @@ export function attach(view: View, graph: Graph, { changed, undo, redo }: Ops) {
   // Every listener, including those of a gesture in progress, ends when this aborts.
   const life = new AbortController()
   const { signal } = life
+
+  const hitAt = (el: Element): Hit => {
+    const node = el.closest<HTMLElement>('[data-node]')?.dataset.node
+    if (node) return { node }
+    const edge = graph.edges.get(el.closest<SVGElement>('[data-wire]')?.dataset.wire ?? '')
+    return edge ? { wire: [...edge] } : {}
+  }
 
   // Drop target, drawio style: an anchor gives a fixed end, a node body a floating one (bare id).
   const endAt = (e: PointerEvent) => {
@@ -103,12 +123,15 @@ export function attach(view: View, graph: Graph, { changed, undo, redo }: Ops) {
       const dropped = e.type === 'pointerup' ? endAt(e) : undefined
       if (!dropped) return
       const [from, to] = make(dropped)
-      if (!graph.canConnect(from, to)) return
+      if (!graph.canConnect(from, to) || !s.canConnect(from, to)) return
       if (lifted) {
         graph.disconnect(...lifted)
-        // The moved wire takes its note along. The old key keeps it too, so undo restores both.
+        // The moved wire takes its note and classes along. The old key keeps them too, so undo
+        // restores both.
         const note = graph.labels.get(hide!)
         if (note) graph.label(from, to, note)
+        const classes = graph.classes.get(hide!)
+        if (classes) graph.classify(from, to, classes)
       }
       graph.connect(from, to)
       if (s.select) view.select([], `${from}>${to}`)
@@ -134,17 +157,23 @@ export function attach(view: View, graph: Graph, { changed, undo, redo }: Ops) {
         view.place(n.id)
       })
     }, e => {
-      // Nodes may pass over each other while dragging, but never stay on top of one another.
       view.dragging = new Set()
-      const others = [...graph.nodes.keys()].filter(id => !group.has(id)).map(id => view.box(id))
-      freeSpots(nodes.map(n => view.box(n.id)), others, GRID, GRID).forEach(([x, y], i) => {
-        Object.assign(nodes[i], { x, y })
-        view.place(nodes[i].id)
-      })
-      if (nodes.some((n, i) => n.x !== starts[i][0] || n.y !== starts[i][1])) changed(before)
+      land(nodes, starts, before)
       // A click on one node of a group selects just that node.
       if (s.select && e.type === 'pointerup' && Math.hypot(e.clientX - sx, e.clientY - sy) < SLOP) view.select([grabbed])
     }, signal, borderPan())
+  }
+
+  // Nodes may pass over each other while moving, but never stay on top of one another: moved
+  // `nodes` settle at the nearest free spot. Reports an edit if any ended up off its `starts`.
+  const land = (nodes: NodeDef[], starts: number[][], before: State) => {
+    const moved = new Set(nodes.map(n => n.id))
+    const others = [...graph.nodes.keys()].filter(id => !moved.has(id)).map(id => view.box(id))
+    freeSpots(nodes.map(n => view.box(n.id)), others, GRID, GRID).forEach(([x, y], i) => {
+      Object.assign(nodes[i], { x, y })
+      view.place(nodes[i].id)
+    })
+    if (nodes.some((n, i) => n.x !== starts[i][0] || n.y !== starts[i][1])) changed(before)
   }
 
   // Shift+drag on the background: on release, adds every node the box touches to the selection.
@@ -187,6 +216,15 @@ export function attach(view: View, graph: Graph, { changed, undo, redo }: Ops) {
 
   const down = (e: PointerEvent) => {
     if (e.button !== 0) return
+    press(e)
+    // Registered after the press's own gesture, so a click sees the selection it made.
+    const hit = hitAt(e.target as Element)
+    gesture(() => {}, up => {
+      if (up.type === 'pointerup' && Math.hypot(up.clientX - e.clientX, up.clientY - e.clientY) < SLOP) pointer('click', hit, up)
+    }, signal)
+  }
+
+  const press = (e: PointerEvent) => {
     const target = e.target as Element
     const node = target.closest<HTMLElement>('[data-node]')?.dataset.node
     // View mode: every drag pans, a click selects a node or clears the selection.
@@ -217,20 +255,47 @@ export function attach(view: View, graph: Graph, { changed, undo, redo }: Ops) {
     if (!s.zoom) return
     e.preventDefault()
     const r = root.getBoundingClientRect()
-    const px = e.clientX - r.left
-    const py = e.clientY - r.top
-    const k = Math.min(s.maxZoom, Math.max(s.minZoom, view.k * Math.exp(-e.deltaY / 500)))
-    const ratio = k / view.k
-    view.viewport(px - (px - view.x) * ratio, py - (py - view.y) * ratio, k)
+    view.zoomAt(e.clientX - r.left, e.clientY - r.top, view.k * Math.exp(-e.deltaY / 500))
+  }
+
+  const native = (e: MouseEvent) => pointer(e.type as 'dblclick' | 'contextmenu', hitAt(e.target as Element), e)
+
+  // pointerover fires per element entered, so compare what it hit to report changes only.
+  let hovered = '{}'
+  const over = (hit: Hit) => {
+    const key = JSON.stringify(hit)
+    if (key === hovered) return
+    hovered = key
+    hover(hit)
+  }
+
+  // Moves the selected nodes one grid step (1px without snapping) as one edit.
+  const nudge = ([dx, dy]: Point) => {
+    const before = graph.toState()
+    const step = s.snap ? GRID : 1
+    const nodes = [...view.selected.nodes].map(id => graph.nodes.get(id)!)
+    const starts = nodes.map(n => [n.x, n.y])
+    for (const n of nodes) Object.assign(n, { x: n.x + dx * step, y: n.y + dy * step, placed: true })
+    land(nodes, starts, before)
   }
 
   // Only keys aimed at the root itself, never ones typed into inputs inside node content.
   const key = (e: KeyboardEvent) => {
     if (!s.keys || e.target !== root || root.dataset.mode !== 'edit') return
     const k = e.key.toLowerCase()
-    if ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y')) {
+    const mod = e.ctrlKey || e.metaKey
+    if (mod && (k === 'z' || k === 'y')) {
       e.preventDefault()
       return k === 'y' || e.shiftKey ? redo() : undo()
+    }
+    if (mod && k === 'a' && s.select) {
+      e.preventDefault()
+      return view.select(graph.nodes.keys())
+    }
+    const arrow = ARROWS.get(e.key)
+    if (arrow && s.move && view.selected.nodes.size) {
+      e.preventDefault()
+      return nudge(arrow)
     }
     if (e.key === 'Escape') return s.select && view.select()
     if (!s.remove || (e.key !== 'Delete' && e.key !== 'Backspace')) return
@@ -250,6 +315,10 @@ export function attach(view: View, graph: Graph, { changed, undo, redo }: Ops) {
   }
 
   root.addEventListener('pointerdown', down, { signal })
+  root.addEventListener('dblclick', native, { signal })
+  root.addEventListener('contextmenu', native, { signal })
+  root.addEventListener('pointerover', e => over(hitAt(e.target as Element)), { signal })
+  root.addEventListener('pointerleave', () => over({}), { signal })
   root.addEventListener('wheel', wheel, { passive: false, signal })
   root.addEventListener('keydown', key, { signal })
   return () => life.abort()

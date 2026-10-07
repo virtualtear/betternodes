@@ -38,6 +38,8 @@ export class Wires {
   private drawn = new Map<string, Point[]>()
   // The <text data-wire> of every wire that shows a note.
   private notes = new Map<string, SVGTextElement>()
+  // Classes from Graph.classes as last applied to each wire's elements.
+  private applied = new Map<string, string[]>()
   // Graph version at the last render; a different one means wires may have been added or removed.
   private seen = -1
 
@@ -148,6 +150,23 @@ export class Wires {
       }
     }
     this.renderNotes()
+    this.renderClasses()
+  }
+
+  // Adds and removes single classes, never rewriting the class attribute: the view toggles
+  // bn-selected on the same elements. Only wires that have or had classes are visited.
+  private renderClasses() {
+    for (const key of new Set([...this.applied.keys(), ...this.graph.classes.keys()])) {
+      const els = this.parts(key)
+      const want = els.length ? this.graph.classes.get(key) ?? [] : []
+      const had = this.applied.get(key) ?? []
+      for (const el of els) {
+        for (const name of had) if (!want.includes(name)) el.classList.remove(name)
+        for (const name of want) if (!el.classList.contains(name)) el.classList.add(name)
+      }
+      if (want.length) this.applied.set(key, want)
+      else this.applied.delete(key)
+    }
   }
 
   // Only wires with a note are visited: usually a few.

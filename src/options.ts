@@ -67,6 +67,13 @@ export interface FlowOptions {
    * @defaultValue `true`
    */
   snap?: boolean
+  /**
+   * Decides whether a wire the user draws or reconnects may exist; return false to reject it.
+   * Gets the ends as they would be stored: `'node.anchor'`, or a bare node id for a floating end.
+   * Wires from code are never checked.
+   * @defaultValue allows every wire
+   */
+  canConnect?: (from: string, to: string) => boolean
 }
 
 /** Resolved options, shared by reference between the flow, its view and its input handling. */
@@ -85,6 +92,7 @@ const DEFAULTS: Settings = {
   move: true,
   remove: true,
   snap: true,
+  canConnect: () => true,
 }
 
 /**

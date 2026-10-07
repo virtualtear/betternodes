@@ -220,3 +220,25 @@ test('set() can switch modes, and data-lock follows the edit rights until destro
   f.destroy()
   expect(el.dataset.lock).toBeUndefined()
 })
+
+test('canConnect rejects new wires and moved ends, but not wires from code', async () => {
+  const canConnect = vi.fn((_: string, to: string) => !to.startsWith('c'))
+  const { el, f, changes } = await setup({ canConnect })
+  await drag(anchor(el, 'a.s'), anchor(el, 'c.n'))
+  await drag(wirePoint(el, 'a.e>b.w', 'to'), anchor(el, 'c.w'))
+  expect(canConnect.mock.calls).toEqual([['a.s', 'c.n'], ['a.e', 'c.w']])
+  expect(changes).not.toHaveBeenCalled()
+  await drag(anchor(el, 'a.s'), anchor(el, 'b.s'))
+  expect(f.state().edges).toEqual([['a.e', 'b.w'], ['a.s', 'b.s']])
+  f.connect('b.e', 'c.w')
+})
+
+test('arrow keys and Ctrl+A follow the move and select options', async () => {
+  const { el, f, changes } = await setup({ move: false })
+  f.select('a')
+  press(el, 'ArrowRight')
+  expect(changes).not.toHaveBeenCalled()
+  f.set({ select: false })
+  press(el, 'a', { ctrlKey: true })
+  expect(f.selection()).toEqual({ nodes: ['a'] })
+})
