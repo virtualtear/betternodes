@@ -6,42 +6,104 @@
   <title>betternodes demo</title>
   <link rel="stylesheet" href="/src/style.css">
   <style>
-    body { margin: 0; height: 100vh; display: flex; flex-direction: column; font: 14px system-ui, sans-serif; }
-    header { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #ddd; }
-    #app { flex: 1; }
-    #fps { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    /* Demo-only status styling for nodes tagged with .class(). */
-    .bn-node.ok { box-shadow: 0 0 0 2px #30a46c; }
-    .bn-node.error { box-shadow: 0 0 0 2px #e5484d; }
-    .bn-node.busy { box-shadow: 0 0 0 2px #f5a524; }
+    :root {
+      color-scheme: light dark;
+      --page: light-dark(#fff, #09090b);
+      --panel: light-dark(#fafafa, #0f0f11);
+      --line: light-dark(rgb(24 24 27 / 0.08), rgb(255 255 255 / 0.08));
+      --text: light-dark(#18181b, #fafafa);
+      --muted: light-dark(#71717a, #a1a1aa);
+      --button: light-dark(#fff, #18181b);
+      --button-hover: light-dark(#f4f4f5, #27272a);
+      --accent: light-dark(#4f46e5, #818cf8);
+      --ok: #10b981;
+      --error: #f43f5e;
+      --busy: #f59e0b;
+    }
+    :root.dark { color-scheme: dark; }
+    :root.light { color-scheme: light; }
+    body {
+      margin: 0; height: 100dvh; display: flex; flex-direction: column;
+      background: var(--page); color: var(--text);
+      font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    ::selection { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+    header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+    .tools { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); }
+    button {
+      font: inherit; font-weight: 500; color: var(--text);
+      padding: 5px 11px; border: 0; border-radius: 8px; background: transparent; cursor: pointer;
+      transition: background-color 120ms ease-out, box-shadow 120ms ease-out;
+      -webkit-tap-highlight-color: transparent;
+    }
+    @media (hover: hover) { button:hover { background: var(--button-hover); } }
+    button:active { scale: 0.97; }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    button[aria-pressed='true'] { background: var(--button); box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgb(24 24 27 / 0.08); }
+    #run[aria-pressed='true'] { color: var(--accent); }
+    .hint { flex: 1 1 320px; margin: 0; color: var(--muted); font-size: 12px; }
+    .hint code { white-space: nowrap; }
+    /* Touch screens: the keyboard hints don't apply, and the graph needs the room. */
+    @media (max-width: 640px) { .hint { display: none; } #events { height: 120px; } }
+    kbd { padding: 1px 5px; border-radius: 5px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); font: 11px ui-monospace, monospace; }
+    .meta { display: flex; gap: 12px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    #selection:not(:empty) { color: var(--accent); font-weight: 500; }
+    #app { flex: 1; min-height: 0; }
+    /* Demo-only status styling for nodes tagged with .class(): a dot before the title, and for
+       errors a tinted ring through the theme variable, so hover and drag shadows still apply. */
+    .bn-node:is(.ok, .error, .busy) .bn-title::before {
+      content: ''; display: inline-block; width: 7px; height: 7px; margin: 0 8px 1px 0; border-radius: 50%;
+      background: var(--status); box-shadow: 0 0 0 3px color-mix(in srgb, var(--status) 18%, transparent);
+    }
+    .bn-node.ok { --status: var(--ok); }
+    .bn-node.busy { --status: var(--busy); }
+    .bn-node.busy .bn-title::before { animation: pulse 1s ease-in-out infinite alternate; }
+    .bn-node.error { --status: var(--error); --bn-node-border: color-mix(in srgb, var(--error) 45%, transparent); --bn-node-hover: var(--error); }
+    .bn-mini-node.ok { fill: color-mix(in srgb, var(--ok) 60%, var(--bn-minimap-node)); }
+    .bn-mini-node.error { fill: var(--error); }
+    @keyframes pulse { to { opacity: 0.35; } }
+    @media (prefers-reduced-motion: reduce) { .bn-node.busy .bn-title::before { animation: none; } }
     .bn-node.photo { cursor: pointer; }
-    .photo-card { padding: 0 12px 10px; }
-    .photo-card img { display: block; border-radius: 4px; background: #e8eaed; }
-    .photo-card p { margin: 6px 0 0; color: #666; font-size: 12px; }
-    .bn-packet.photo-packet { fill: #3e63dd; }
-    #events { height: 160px; display: flex; flex-direction: column; border-top: 1px solid #ddd; }
-    #events-bar { display: flex; justify-content: space-between; align-items: center; padding: 4px 12px; background: #f6f7f9; font-weight: 600; }
-    #log { flex: 1; overflow: auto; margin: 0; padding: 4px 12px; list-style: none; font: 12px/1.6 ui-monospace, monospace; }
-    #log time { color: #888; }
-    #log b { display: inline-block; width: 8ch; margin-left: 1ch; }
-    #log .change { color: #30a46c; }
-    #log .select { color: #ff6d5a; }
-    #log .send { color: #3e63dd; }
+    .photo-card { padding: 0 14px 12px; }
+    .photo-card img { display: block; border-radius: 8px; background: var(--bn-grid); }
+    .photo-card p { margin: 8px 0 0; color: var(--bn-text-muted); font-size: 12px; }
+    .bn-packet.photo-packet { fill: #0ea5e9; }
+    #events { height: 168px; display: flex; flex-direction: column; border-top: 1px solid var(--line); background: var(--panel); }
+    #events-bar { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px 6px 14px; color: var(--muted); font-size: 12px; font-weight: 600; }
+    #log { flex: 1; overflow: auto; margin: 0; padding: 0 14px 8px; list-style: none; font: 12px/1.7 ui-monospace, monospace; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+    #log time { color: var(--muted); }
+    #log b { display: inline-block; width: 9ch; margin-left: 1.5ch; font-weight: 600; }
+    #log .change { color: var(--ok); }
+    #log .select, #log .click, #log .dblclick { color: var(--accent); }
+    #log .send { color: #0ea5e9; }
   </style>
 </head>
 <body>
   <header>
-    <button id="mode">Edit</button>
-    <button id="undo">Undo</button>
-    <button id="redo">Redo</button>
-    <button id="send">Send</button>
-    <button id="run" aria-pressed="false">Run</button>
-    <button id="layout">Layout</button>
-    <button id="fit">Fit</button>
-    <button id="reset">Reset saved state</button>
-    <span>Edit mode: click a wire or node, Shift+click or Shift+drag for more, then Delete. Drag to an edge to scroll. Ctrl+Z / Ctrl+Shift+Z. <code>?n=1000</code> for a stress test.</span>
-    <output id="selection"></output>
-    <output id="fps" title="Frames per second over the last half second, and the slowest frame in it">- fps</output>
+    <div class="tools" role="group" aria-label="Mode">
+      <button id="view" aria-pressed="true">View</button>
+      <button id="edit" aria-pressed="false">Edit</button>
+    </div>
+    <div class="tools">
+      <button id="undo">Undo</button>
+      <button id="redo">Redo</button>
+    </div>
+    <div class="tools">
+      <button id="send">Send</button>
+      <button id="run" aria-pressed="false">Run</button>
+    </div>
+    <div class="tools">
+      <button id="layout">Layout</button>
+      <button id="fit">Fit</button>
+      <button id="theme" aria-pressed="false">Dark</button>
+      <button id="reset">Reset</button>
+    </div>
+    <p class="hint">Edit mode: click a wire or node, <kbd>Shift</kbd>+click or <kbd>Shift</kbd>+drag for more, then <kbd>Delete</kbd>. Drag to an edge to scroll. <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>. <code>?n=1000</code> for a stress test.</p>
+    <div class="meta">
+      <output id="selection"></output>
+      <output id="fps" title="Frames per second over the last half second, and the slowest frame in it">- fps</output>
+    </div>
   </header>
   <div id="app"></div>
   <div id="events">
@@ -79,7 +141,7 @@
       }
     } else {
       const note = document.createElement('p')
-      note.style.cssText = 'margin: 0; padding: 6px 12px; color: #666; max-width: 180px'
+      note.style.cssText = 'margin: 0; padding: 0 14px 12px; color: var(--bn-text-muted); font-size: 12px; max-width: 180px'
       note.textContent = 'Custom content: any element, from any framework.'
 
       // No at(): auto-layout places these. Bare ids make floating wire ends.
@@ -143,12 +205,21 @@
     f.on('select', selection => write('select', JSON.stringify(selection)))
     for (const type of ['click', 'dblclick']) f.on(type, hit => write(type, JSON.stringify(hit)))
 
-    let mode = 'view'
-    document.getElementById('mode').onclick = e => {
-      mode = mode === 'view' ? 'edit' : 'view'
+    for (const mode of ['view', 'edit']) document.getElementById(mode).onclick = () => {
       f.mode(mode)
-      e.target.textContent = mode === 'view' ? 'Edit' : 'View'
+      for (const other of ['view', 'edit']) document.getElementById(other).setAttribute('aria-pressed', String(other === mode))
     }
+    // The page follows the system theme until toggled; the graph follows the page.
+    const app = document.getElementById('app')
+    const theme = document.getElementById('theme')
+    const paint = dark => {
+      document.documentElement.classList.toggle('dark', dark)
+      document.documentElement.classList.toggle('light', !dark)
+      app.classList.toggle('bn-dark', dark)
+      theme.setAttribute('aria-pressed', String(dark))
+    }
+    paint(matchMedia('(prefers-color-scheme: dark)').matches)
+    theme.onclick = () => paint(theme.getAttribute('aria-pressed') !== 'true')
     // Packets: Send floods the graph once from its first node, Run keeps sending every second.
     window.f = f
     const first = n ? 'n0' : 'hook'
