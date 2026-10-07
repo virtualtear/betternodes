@@ -9,6 +9,11 @@ A small, framework-agnostic node graph viewer and editor. Define nodes and wires
 fluent API, show them read-only, or let users edit them drawio-style. Every user edit is reported
 as JSON, so you can persist it wherever you like.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.png">
+  <img alt="A workflow graph: Webhook feeds an IF node and an image service node; wires with the notes true and false lead to Send mail and Log, framed as an Output group, with a minimap in the corner." src="docs/screenshots/overview-light.png">
+</picture>
+
 ```ts
 const f = flow(document.getElementById('graph')!)
 f.node('hook').title('Webhook')
@@ -531,7 +536,8 @@ f.on('change', (_, diff) => api.patch('/graph', diff))
 
 ## Theming
 
-Override these CSS variables on `.bn` or on your root element:
+The default theme is light, on zinc neutrals with an indigo accent. For dark, add a class to the
+root element:
 
 ```ts
 el.classList.add('bn-dark')   // always dark
