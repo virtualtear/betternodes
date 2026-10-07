@@ -1,13 +1,10 @@
-import { nodeOf, type Graph } from '../model/graph'
 import { Buckets } from '../geometry/buckets'
 import { separate } from '../geometry/lanes'
-import { bounds, halfway, overlap, type Point, type Rect } from '../geometry/rect'
+import { bounds, halfway, inflate, overlap, type Point, type Rect } from '../geometry/rect'
 import { CLEAR } from '../geometry/route'
 import { rounded, Track } from '../geometry/svg-path'
-import { svg } from './dom'
-
-// `r` with `m` px added on every side.
-const grow = ([x, y, w, h]: Rect, m: number): Rect => [x - m, y - m, w + 2 * m, h + 2 * m]
+import { nodeOf, type Graph } from '../model/graph'
+import { setAttrs, svg } from './dom'
 
 /**
  * Where a wire's note goes: the middle of its longest inner segment where `fits` says the note is
@@ -28,23 +25,22 @@ export function notePoint(points: Point[], fits: (at: Point) => boolean): Point 
 /** Draws every wire of a graph as SVG and re-routes only the wires a node change can affect. */
 export class Wires {
   // One <g data-wire> per wire: a visible path plus a wide transparent one to grab it by.
-  private groups = new Map<string, SVGGElement>()
+  private readonly groups = new Map<string, SVGGElement>()
   // Each wire's routed bounding box, and every node's rect as of the last render: together they
   // tell which wires a moving node may now block or free.
-  private boxes = new Map<string, Rect>()
+  private readonly boxes = new Map<string, Rect>()
   private rects = new Map<string, Rect>()
   // Spots of nodes removed since the last render: wires that went around them can straighten out.
-  private freed: Rect[] = []
-  // Routed waypoints per wire, before and after lane separation.
-  private routes = new Map<string, Point[]>()
+  private readonly freed: Rect[] = []
+  // Waypoints per wire, before and after lane separation.
+  private readonly routes = new Map<string, Point[]>()
   private drawn = new Map<string, Point[]>()
-  // Tracks of drawn wires, built when a packet first needs one and dropped on every re-route.
-  private tracks = new Map<string, Track>()
-  // The <text data-wire> of every wire that shows a note.
-  private notes = new Map<string, SVGTextElement>()
+  // Built when a packet first needs one, dropped on every re-route.
+  private readonly tracks = new Map<string, Track>()
+  private readonly notes = new Map<string, SVGTextElement>()
   // Classes from Graph.classes as last applied to each wire's elements.
-  private applied = new Map<string, string[]>()
-  // Graph version at the last render; a different one means wires may have been added or removed.
+  private readonly applied = new Map<string, string[]>()
+  // Graph version at the last render.
   private seen = -1
 
   /**
@@ -54,10 +50,10 @@ export class Wires {
    * @param route - waypoints for a wire between two refs, around `obstacles`.
    */
   constructor(
-    private graph: Graph,
-    private layer: SVGGElement,
-    private box: (id: string) => Rect,
-    private route: (from: string, to: string, obstacles: Rect[]) => Point[],
+    private readonly graph: Graph,
+    private readonly layer: SVGGElement,
+    private readonly box: (id: string) => Rect,
+    private readonly route: (from: string, to: string, obstacles: Rect[]) => Point[],
   ) {}
 
   /** A drawn wire's elements: its `<g data-wire>` group, plus its note if it has one. */
@@ -89,7 +85,8 @@ export class Wires {
     // Idle frames (panning, packets) skip the per-node and per-wire scans entirely.
     if (!touched.size && !this.freed.length && this.seen === this.graph.version) return
     this.seen = this.graph.version
-    const now = new Map([...this.graph.nodes.keys()].map(id => [id, this.box(id)]))
+    const now = new Map<string, Rect>()
+    for (const id of this.graph.nodes.keys()) now.set(id, this.box(id))
     const obstacles = [...now.values()]
     // Old and new spots of every node that moved or resized: wires passing there need a new route.
     // Bucketed, so dragging a group doesn't compare every wire with every spot.
@@ -102,41 +99,27 @@ export class Wires {
     }
     const last = this.rects
     this.rects = now
-    // How far a node moved since the last render; undefined if it is new or changed size.
-    const shift = (id: string) => {
+    // Undefined if the node is new or changed size.
+    const shift = (id: string): Point | undefined => {
       const [a, b] = [last.get(id), now.get(id)!]
       return a && a[2] === b[2] && a[3] === b[3] ? [b[0] - a[0], b[1] - a[1]] : undefined
     }
     let rerouted = false
-    for (const [key, g] of this.groups) {
+    for (const key of this.groups.keys()) {
       if (this.graph.edges.has(key)) continue
-      g.remove()
-      this.notes.get(key)?.remove()
-      this.groups.delete(key)
-      this.boxes.delete(key)
-      this.routes.delete(key)
-      this.notes.delete(key)
+      this.forget(key)
       rerouted = true
     }
     for (const [key, [from, to]] of this.graph.edges) {
       const [f, t] = [nodeOf(from), nodeOf(to)]
-      let g = this.groups.get(key)
-      if (!g) {
-        g = svg('g')
-        g.dataset.wire = key
-        g.append(svg('path', 'bn-wire'), svg('path', 'bn-hit'))
-        this.groups.set(key, g)
-        this.layer.before(g)
-      } else if (!touched.has(f) && !touched.has(t) && spots.empty(grow(this.boxes.get(key)!, CLEAR))) continue
+      if (!this.groups.has(key)) this.create(key)
+      else if (!touched.has(f) && !touched.has(t) && spots.empty(inflate(this.boxes.get(key)!, CLEAR))) continue
       else if (rigid.has(f) && rigid.has(t)) {
         // Both ends moved by the same offset: shift the route along instead of searching a new one.
         const [d, e] = [shift(f), shift(t)]
         if (d && e && d[0] === e[0] && d[1] === e[1]) {
           if (!d[0] && !d[1]) continue
-          const [dx, dy] = d
-          this.routes.set(key, this.routes.get(key)!.map(([x, y]): Point => [x + dx, y + dy]))
-          const [bx, by, bw, bh] = this.boxes.get(key)!
-          this.boxes.set(key, [bx + dx, by + dy, bw, bh])
+          this.translate(key, d)
           rerouted = true
           continue
         }
@@ -146,19 +129,41 @@ export class Wires {
       this.routes.set(key, points)
       rerouted = true
     }
-    if (rerouted) {
-      // Lanes depend on every wire in a corridor, so re-spread all and write only paths that changed.
-      this.drawn = separate(this.routes)
-      this.tracks.clear()
-      for (const [key, points] of this.drawn) {
-        const d = rounded(points)
-        const g = this.groups.get(key)!
-        if (g.firstElementChild!.getAttribute('d') === d) continue
-        for (const path of g.children) path.setAttribute('d', d)
-      }
-    }
+    if (rerouted) this.redraw()
     this.renderNotes()
     this.renderClasses()
+  }
+
+  private create(key: string) {
+    const g = svg('g')
+    g.dataset.wire = key
+    g.append(svg('path', 'bn-wire'), svg('path', 'bn-hit'))
+    this.groups.set(key, g)
+    this.layer.before(g)
+  }
+
+  private forget(key: string) {
+    this.groups.get(key)?.remove()
+    this.notes.get(key)?.remove()
+    for (const map of [this.groups, this.boxes, this.routes, this.notes]) map.delete(key)
+  }
+
+  private translate(key: string, [dx, dy]: Point) {
+    this.routes.set(key, this.routes.get(key)!.map(([x, y]): Point => [x + dx, y + dy]))
+    const [x, y, w, h] = this.boxes.get(key)!
+    this.boxes.set(key, [x + dx, y + dy, w, h])
+  }
+
+  // Lanes depend on every wire in a corridor, so all are re-spread; only changed paths are written.
+  private redraw() {
+    this.drawn = separate(this.routes)
+    this.tracks.clear()
+    for (const [key, points] of this.drawn) {
+      const d = rounded(points)
+      const g = this.groups.get(key)!
+      if (g.firstElementChild!.getAttribute('d') === d) continue
+      for (const path of g.children) path.setAttribute('d', d)
+    }
   }
 
   // Adds and removes single classes, never rewriting the class attribute: the view toggles
@@ -201,10 +206,8 @@ export class Wires {
         for (const r of this.rects.values()) if (overlap(r, box)) return false
         return true
       }
-      const [x, y] = notePoint(this.drawn.get(key)!, fits).map(String)
-      // Unchanged values are skipped: rewriting SVG geometry costs a layout even when equal.
-      if (note.getAttribute('x') !== x) note.setAttribute('x', x)
-      if (note.getAttribute('y') !== y) note.setAttribute('y', y)
+      const [x, y] = notePoint(this.drawn.get(key)!, fits)
+      setAttrs(note, { x, y })
     }
   }
 }

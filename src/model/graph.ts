@@ -1,3 +1,5 @@
+import { wireKey, type Edge, type State } from './state'
+
 /** A node as defined in code; x/y are world coordinates. */
 export interface NodeDef {
   id: string
@@ -15,61 +17,20 @@ export interface NodeDef {
 export interface GroupDef {
   id: string
   title: string
-  /** Extra CSS classes on the frame. */
   classes?: string[]
 }
 
-/** Anchor names: a node's corners and edge midpoints, by compass direction. */
-export type Anchor = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
-
-/** Connection points on a node's border, as fractions of its width and height. */
-export const ANCHORS: Record<Anchor, [fx: number, fy: number]> = {
+/** Connection points on a node's border by compass name, as fractions of its width and height. */
+export const ANCHORS = {
   nw: [0, 0], n: [0.5, 0], ne: [1, 0], e: [1, 0.5], se: [1, 1], s: [0.5, 1], sw: [0, 1], w: [0, 0.5],
-}
+} as const satisfies Record<string, readonly [fx: number, fy: number]>
 
-/** A directed wire between two anchor refs, both `'nodeId.anchor'`. */
-export type Edge = [from: string, to: string]
+/** Anchor names: a node's corners and edge midpoints, by compass direction. */
+export type Anchor = keyof typeof ANCHORS
 
-/** Serializable editor state: everything a user can change in edit mode. */
-export interface State {
-  positions: Record<string, [number, number]>
-  edges: Edge[]
-  /** Ids of nodes the user deleted; only present when there are any. */
-  removed?: string[]
-}
+export const isAnchor = (name: string): name is Anchor => Object.hasOwn(ANCHORS, name)
 
-/** What a user edit changed; enough to persist edits incrementally. */
-export interface Diff {
-  added: Edge[]
-  removed: Edge[]
-  /** New positions of nodes that moved. */
-  moved: Record<string, [number, number]>
-  /** Nodes the user deleted. */
-  nodesRemoved: string[]
-  /** Deleted nodes that came back, e.g. through undo. */
-  nodesRestored: string[]
-}
-
-/** Compares two states: wires by `from>to` key, positions by value. */
-export function diff(before: State, after: State): Diff {
-  const keys = (s: State) => new Set(s.edges.map(e => e.join('>')))
-  const [had, has] = [keys(before), keys(after)]
-  const moved: Diff['moved'] = {}
-  for (const [id, [x, y]] of Object.entries(after.positions)) {
-    const old = before.positions[id]
-    if (!old || old[0] !== x || old[1] !== y) moved[id] = [x, y]
-  }
-  const [wasGone, isGone] = [new Set(before.removed), new Set(after.removed)]
-  return {
-    added: after.edges.filter(e => !had.has(e.join('>'))),
-    removed: before.edges.filter(e => !has.has(e.join('>'))),
-    moved,
-    nodesRemoved: [...isGone].filter(id => !wasGone.has(id)),
-    nodesRestored: [...wasGone].filter(id => !isGone.has(id)),
-  }
-}
-
-/** Node id of a `'nodeId.anchor'` ref; node ids contain no dots, so the first dot splits. */
+/** Node id of a ref; node ids contain no dots, so the first dot splits. */
 export const nodeOf = (ref: string) => ref.split('.', 1)[0]
 
 /** Anchor name of a `'nodeId.anchor'` ref. */
@@ -77,38 +38,39 @@ export const anchorOf = (ref: string) => ref.slice(ref.indexOf('.') + 1) as Anch
 
 /** Pure graph model, no DOM. */
 export class Graph {
-  nodes = new Map<string, NodeDef>()
-  // Keyed by `from>to`, so duplicates collapse for free.
-  edges = new Map<string, Edge>()
-  // Deleted nodes keep their definition here, so undo or load() can bring them back.
-  trash = new Map<string, NodeDef>()
-  // Notes on wires, by `from>to` key, set from code. They outlive their wire, so a wire that undo
-  // or load() brings back gets its note back too.
-  labels = new Map<string, string>()
-  // Extra CSS classes on wires, by `from>to` key, set from code; they outlive their wire like notes.
-  classes = new Map<string, string[]>()
-  groups = new Map<string, GroupDef>()
-  /** Group id per grouped node id, so a node is in at most one group. Kept for deleted nodes too. */
-  memberOf = new Map<string, string>()
+  readonly nodes = new Map<string, NodeDef>()
+  readonly edges = new Map<string, Edge>()
+  /** Deleted nodes, kept so undo or `load()` can bring them back. */
+  readonly trash = new Map<string, NodeDef>()
+  /** Wire notes by wire key; they outlive their wire, so a wire brought back gets its note back. */
+  readonly labels = new Map<string, string>()
+  /** Extra CSS classes by wire key; they outlive their wire like notes. */
+  readonly classes = new Map<string, string[]>()
+  readonly groups = new Map<string, GroupDef>()
+  /** Group id per node id, so a node is in at most one group. Kept for deleted nodes too. */
+  readonly memberOf = new Map<string, string>()
   /** Bumped on every change to wires or nodes, so derived lookups know when to rebuild. */
   version = 0
 
   /** True if both refs name existing anchors or nodes, on different nodes, and the wire is new. */
   canConnect(from: string, to: string) {
-    return this.has(from) && this.has(to) && nodeOf(from) !== nodeOf(to) && !this.edges.has(`${from}>${to}`)
+    return this.has(from) && this.has(to) && nodeOf(from) !== nodeOf(to) && !this.edges.has(wireKey(from, to))
   }
 
   /** @throws if {@link Graph.canConnect} rejects the wire. */
   connect(from: string, to: string) {
     if (!this.canConnect(from, to)) throw new Error(`betternodes: invalid wire ${from} -> ${to}`)
-    this.edges.set(`${from}>${to}`, [from, to])
+    this.edges.set(wireKey(from, to), [from, to])
     this.version++
   }
 
-  /**
-   * Trashes or restores nodes to match `state.removed`, applies saved positions to known nodes and
-   * replaces all wires, skipping invalid ones.
-   */
+  /** @returns false if there was no such wire. */
+  disconnect(from: string, to: string) {
+    this.version++
+    return this.edges.delete(wireKey(from, to))
+  }
+
+  /** Trashes or restores nodes to match `state.removed`, moves known nodes and replaces all wires. */
   load(state: State) {
     this.version++
     const removed = new Set(state.removed)
@@ -140,18 +102,14 @@ export class Graph {
     return true
   }
 
-  /** Sets the note on the wire from `from` to `to`; no text removes it. */
+  /** Sets the note on a wire; no text removes it. */
   label(from: string, to: string, text?: string) {
-    if (text) this.labels.set(`${from}>${to}`, text)
-    else this.labels.delete(`${from}>${to}`)
-    this.version++
+    this.patch(this.labels, wireKey(from, to), text || undefined)
   }
 
-  /** Sets the extra CSS classes of the wire from `from` to `to`, replacing earlier ones; none clears them. */
+  /** Sets the extra CSS classes of a wire, replacing earlier ones; none clears them. */
   classify(from: string, to: string, names: string[]) {
-    if (names.length) this.classes.set(`${from}>${to}`, [...names])
-    else this.classes.delete(`${from}>${to}`)
-    this.version++
+    this.patch(this.classes, wireKey(from, to), names.length ? [...names] : undefined)
   }
 
   /** Makes `ids` the members of `group`, taking them out of any other group. */
@@ -172,22 +130,22 @@ export class Graph {
     return out
   }
 
-  /** @returns false if there was no such wire. */
-  disconnect(from: string, to: string) {
-    this.version++
-    return this.edges.delete(`${from}>${to}`)
-  }
-
-  // A ref is `'nodeId.anchor'`, or a bare `'nodeId'` whose anchor the view picks per render.
-  private has(ref: string) {
-    return this.nodes.has(nodeOf(ref)) && (!ref.includes('.') || Object.hasOwn(ANCHORS, anchorOf(ref)))
-  }
-
   toState(): State {
     const positions: State['positions'] = {}
     for (const n of this.nodes.values()) positions[n.id] = [n.x, n.y]
     const state: State = { positions, edges: [...this.edges.values()].map(([from, to]) => [from, to]) }
     if (this.trash.size) state.removed = [...this.trash.keys()]
     return state
+  }
+
+  // A bare node id is a valid ref too: the view picks its anchor per render.
+  private has(ref: string) {
+    return this.nodes.has(nodeOf(ref)) && (!ref.includes('.') || isAnchor(anchorOf(ref)))
+  }
+
+  private patch<V>(map: Map<string, V>, key: string, value: V | undefined) {
+    if (value === undefined) map.delete(key)
+    else map.set(key, value)
+    this.version++
   }
 }

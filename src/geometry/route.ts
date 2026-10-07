@@ -1,5 +1,5 @@
 import { Heap } from './heap'
-import { overlap, type Point, type Rect } from './rect'
+import { bounds, inflate, overlap, type Point, type Rect } from './rect'
 
 // Wires step this far straight out of a node before turning (less when another node is close).
 const STUB = 20
@@ -16,13 +16,12 @@ const BUDGET = 8000
 const STEP: Point[] = [[1, 0], [-1, 0], [0, 1], [0, -1]]
 const dirOf = ([dx, dy]: Point) => (dx > 0 ? 0 : dx < 0 ? 1 : dy > 0 ? 2 : 3)
 
-// Does the axis-aligned segment p-q cross a rect's interior? Running along an edge is fine.
-function blocked([x1, y1]: Point, [x2, y2]: Point, rects: Rect[]) {
-  const seg: Rect = [Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1)]
+// Running along an edge is fine; only crossing an interior blocks.
+function blocked(p: Point, q: Point, rects: Rect[]) {
+  const seg = bounds([p, q])
   return rects.some(r => overlap(r, seg))
 }
 
-// Drops repeated points and points in the middle of a straight run.
 function simplify(points: Point[]) {
   const out: Point[] = []
   for (const p of points) {
@@ -44,18 +43,14 @@ function simplify(points: Point[]) {
 // ponytail: obstacles are scanned linearly and limited to a region around the wire; add a spatial
 // index if graphs pass ~2k nodes, and a wider region if far detours start crossing nodes.
 export function route(a: Point, da: Point, b: Point, db: Point, obstacles: Rect[]): Point[] {
-  // The region spans both full-length stubs plus a margin, so it also holds every node a stub can hit.
-  const region: Rect = [
-    Math.min(a[0], b[0]) - STUB - REGION, Math.min(a[1], b[1]) - STUB - REGION,
-    Math.abs(a[0] - b[0]) + 2 * (STUB + REGION), Math.abs(a[1] - b[1]) + 2 * (STUB + REGION),
-  ]
-  const nearby = obstacles.filter(r => overlap(r, region, CLEAR)) // graphs can have thousands of nodes
+  // Spans both full-length stubs plus a margin, so it holds every node a stub can hit.
+  const region = inflate(bounds([a, b]), STUB + REGION)
+  const nearby = obstacles.filter(r => overlap(r, region, CLEAR))
   const s = stub(a, da, nearby)
   const t = stub(b, db, nearby)
-  // Keep the full clearance where there is room; between nodes that sit close together, squeeze
-  // through with a thin margin rather than give up.
+  // Full clearance where there is room; between close nodes, squeeze through a thin margin instead.
   for (const clear of [CLEAR, 2]) {
-    const rects = nearby.map(([x, y, w, h]): Rect => [x - clear, y - clear, w + 2 * clear, h + 2 * clear])
+    const rects = nearby.map(r => inflate(r, clear))
     const path = attempt(a, s, t, b, dirOf(da), dirOf([-db[0], -db[1]]), rects)
     if (path) return path
   }
@@ -80,10 +75,10 @@ function stub(p: Point, d: Point, obstacles: Rect[]): Point {
 // Returns undefined when nothing fits, so the caller can retry with less clearance.
 function attempt(a: Point, s: Point, t: Point, b: Point, start: number, end: number, rects: Rect[]) {
   const inside = ([px, py]: Point) => rects.some(r => overlap(r, [px, py, 0, 0]))
-  if (inside(s) || inside(t)) return // the search could never reach it; don't burn the budget
+  if (inside(s) || inside(t)) return // unreachable: don't burn the search budget
   const [mx, my] = [(s[0] + t[0]) / 2, (s[1] + t[1]) / 2]
 
-  // Fast path: straight, L and Z shapes. Most wires need nothing more.
+  // Straight, L and Z shapes: most wires need nothing more than these.
   const shapes: Point[][] = [
     [s, t],
     [s, [t[0], s[1]], t],
@@ -95,10 +90,10 @@ function attempt(a: Point, s: Point, t: Point, b: Point, start: number, end: num
     const full = simplify([a, ...pts, b])
     for (let i = 1; i < full.length; i++) {
       const [p, q] = [full[i - 1], full[i]]
-      if (p[0] !== q[0] && p[1] !== q[1]) return false // diagonal: not a valid shape here
+      if (p[0] !== q[0] && p[1] !== q[1]) return false
     }
     for (let i = 1; i < pts.length; i++) if (blocked(pts[i - 1], pts[i], rects)) return false
-    // No U-turn right after leaving `a` or right before entering `b`.
+    // No U-turn right after leaving `a` or before entering `b`.
     const dirs = full.slice(1).map((q, i) => dirOf([q[0] - full[i][0], q[1] - full[i][1]]))
     return dirs[0] === start && dirs[dirs.length - 1] === end
   }

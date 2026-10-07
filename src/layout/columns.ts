@@ -1,5 +1,5 @@
-import { nodeOf, type Graph } from '../model/graph'
 import { FRAME, snap, type Point } from '../geometry/rect'
+import { nodeOf, type Graph } from '../model/graph'
 
 const GAP_X = 80
 const GAP_Y = 40
@@ -18,12 +18,7 @@ export function layout(graph: Graph, sizes: Map<string, Point>, grid: number) {
   const todo = [...graph.nodes.values()].filter(n => !n.placed)
   if (!todo.length) return out
 
-  const sources = new Map<string, string[]>()
-  for (const [from, to] of graph.edges.values()) {
-    const list = sources.get(nodeOf(to))
-    if (list) list.push(nodeOf(from))
-    else sources.set(nodeOf(to), [nodeOf(from)])
-  }
+  const incoming = Map.groupBy(graph.edges.values(), ([, to]) => nodeOf(to))
   const depths = new Map<string, number>()
   const visiting = new Set<string>()
   const depth = (id: string): number => {
@@ -31,7 +26,7 @@ export function layout(graph: Graph, sizes: Map<string, Point>, grid: number) {
     if (visiting.has(id)) return -1 // back edge of a cycle: ignore it
     visiting.add(id)
     let d = 0
-    for (const source of sources.get(id) ?? []) d = Math.max(d, depth(source) + 1)
+    for (const [from] of incoming.get(id) ?? []) d = Math.max(d, depth(nodeOf(from)) + 1)
     visiting.delete(id)
     depths.set(id, d)
     return d

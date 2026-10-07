@@ -493,8 +493,9 @@ reverted too.
 
 ### Exported types
 
-`Flow`, `NodeBuilder`, `GroupBuilder`, `FlowOptions`, `State`, `Diff`, `Edge`, `Anchor`, `End`, `Selection`, `Hit`,
-`Viewport` and `SendOptions`.
+`Flow`, `NodeBuilder`, `GroupBuilder`, `FlowOptions`, `FlowEvents`, `State`, `Diff`, `Edge`, `Anchor`, `End`,
+`Selection`, `Hit`, `Viewport` and `SendOptions`. `FlowEvents` maps every event type of `f.on()` to its
+listener arguments, so a listener for a misspelled event or with the wrong arguments fails to compile.
 
 ## Editor controls
 
@@ -677,7 +678,7 @@ plain data and math that tests can check without rendering.
 
 ```mermaid
 flowchart LR
-  app[Your code] --> flow[flow.ts<br>Flow, NodeBuilder]
+  app[Your code] --> flow[flow.ts, builders.ts<br>Flow, NodeBuilder, GroupBuilder]
   flow --> view[view/<br>DOM, input, packets]
   flow --> model[model/<br>graph, state, history]
   view --> layout[layout/<br>auto-layout, overlaps]
@@ -690,14 +691,17 @@ flowchart LR
 ```
 src/
   index.ts          public exports
-  flow.ts           Flow facade and NodeBuilder: the public API
+  flow.ts           Flow facade: the public API
+  builders.ts       NodeBuilder and GroupBuilder
+  types.ts          public types: FlowEvents, Selection, Viewport, checked wire ends
   options.ts        FlowOptions, their defaults and merging
   style.css         default look, themed with CSS variables
-  model/            graph data, saved state, diffs, undo history
+  model/            graph data, saved state and diffs, undo history
   geometry/         pure math: rects, spatial hash, min-heap, wire routing, lanes, SVG path data
   layout/           pure node placement: auto-layout columns, pulling overlaps apart
-  view/             DOM: frame scheduler and nodes, wires, group frames, minimap, input, packets
-                    (moved in JS, drawn with WebGL)
+  view/             DOM: frame scheduler and nodes, anchors, wires, group frames, minimap
+    input/          pointer and keyboard input: routing, gestures, drags, editor keys
+    packets/        packets moved in JS, drawn with WebGL2 (SVG fallback), looks read from CSS
 test/               browser tests, plus compile-time type checks in types.check.ts
 bench/              performance benchmarks with budgets
 index.html          demo page served by `npm run dev`

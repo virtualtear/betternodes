@@ -1,10 +1,14 @@
 import { Flow } from './flow'
 import type { FlowOptions } from './options'
 
-export { Flow, GroupBuilder, NodeBuilder, type End, type Hit, type Selection, type Viewport } from './flow'
-export type { Anchor, Diff, Edge, State } from './model/graph'
+export { GroupBuilder, NodeBuilder } from './builders'
+export { Flow } from './flow'
+export type { Anchor } from './model/graph'
+export type { Diff, Edge, State } from './model/state'
 export type { FlowOptions } from './options'
-export type { SendOptions } from './view/packets'
+export type { End, FlowEvents, Selection, Viewport } from './types'
+export type { Hit } from './view/input/interact'
+export type { SendOptions } from './view/packets/packets'
 
 /**
  * Mounts a node graph in `root`.

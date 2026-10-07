@@ -1,116 +1,34 @@
-import { Graph, diff, type Anchor, type Diff, type Edge, type GroupDef, type NodeDef, type State } from './model/graph'
+import { GroupBuilder, NodeBuilder } from './builders'
+import { Graph } from './model/graph'
 import { History } from './model/history'
+import { diff, wireKey, type State } from './model/state'
 import { settle, type FlowOptions, type Settings } from './options'
-import { attach, type Hit } from './view/interact'
-import { Packets, type SendOptions } from './view/packets'
+import type { End, FlowEvents, Selection, Viewport } from './types'
+import { attach, type Emitted } from './view/input/interact'
+import { Packets, type SendOptions } from './view/packets/packets'
 import { View } from './view/view'
 
-/**
- * A wire end: `'nodeId.anchor'`, or a bare `'nodeId'`. String literals are checked, so a typo like
- * `'a.x'` fails to compile; non-literal strings pass and are validated at runtime.
- */
-export type End<S extends string> = S extends `${infer Id}.${infer A}` ? (A extends Anchor ? S : `${Id}.${Anchor}`) : S
+const RIGHTS = ['connect', 'move', 'remove'] as const satisfies readonly (keyof Settings)[]
 
-export type { Hit }
-
-/** Pan offset (where the world origin sits, in screen px from the root's top-left) and zoom factor. */
-export interface Viewport {
-  x: number
-  y: number
-  zoom: number
-}
-
-/** What is selected: any number of nodes, or one wire. */
-export interface Selection {
-  nodes: string[]
-  /** Only present while a wire is selected; `nodes` is empty then. */
-  wire?: Edge
-}
-
-/** Fluent handle for defining one node. */
-export class NodeBuilder {
-  constructor(private def: NodeDef, private view: View) {}
-
-  private set(patch: Partial<NodeDef>) {
-    Object.assign(this.def, patch)
-    this.view.mark(this.def.id)
-    return this
-  }
-
-  /** Sets the node's title text. */
-  title(text: string) {
-    return this.set({ title: text })
-  }
-
-  /** Places the node's top-left corner at world coordinates. */
-  at(x: number, y: number) {
-    Object.assign(this.def, { x, y, placed: true })
-    this.view.place(this.def.id)
-    return this
-  }
-
-  /** Sets extra CSS classes on the node, replacing earlier ones; e.g. a status like `'error'`. */
-  class(...names: string[]) {
-    this.def.classes = names
-    this.view.place(this.def.id)
-    return this
-  }
-
-  /** Mounts custom markup below the title; render it with any framework. */
-  content(el: HTMLElement) {
-    return this.set({ content: el })
-  }
-}
-
-/** Fluent handle for defining one group: a titled frame drawn around its member nodes. */
-export class GroupBuilder {
-  constructor(private def: GroupDef, private graph: Graph, private view: View) {}
-
-  private set(patch: Partial<GroupDef>) {
-    Object.assign(this.def, patch)
-    this.view.markGroups()
-    return this
-  }
-
-  /** Sets the frame's title text. */
-  title(text: string) {
-    return this.set({ title: text })
-  }
-
-  /** Sets extra CSS classes on the frame, replacing earlier ones. */
-  class(...names: string[]) {
-    return this.set({ classes: names })
-  }
-
-  /**
-   * Makes these nodes the members, replacing earlier ones. A node is in at most one group, so this
-   * takes it out of any other.
-   * @remarks Ids of nodes not defined yet, or deleted by the user, are fine: the frame shows
-   * whichever members exist, and hides while there are none.
-   */
-  nodes(...ids: string[]) {
-    this.graph.setMembers(this.def.id, ids)
-    this.view.markGroups()
-    return this
-  }
+const fail = (message: string): never => {
+  throw new Error(`betternodes: ${message}`)
 }
 
 /** A node graph mounted in a DOM element. Starts in view mode unless the `mode` option says otherwise. */
 export class Flow extends EventTarget {
-  private graph = new Graph()
-  private view: View
-  private detach: () => void
-  private packets: Packets
-  // Snapshots from before each user edit, and from before each undo.
-  private history: History<State>
-  // Shared with the view and the input handlers, which read it on every event; set() updates it in place.
-  private settings: Settings
+  private readonly graph = new Graph()
+  private readonly view: View
+  private readonly packets: Packets
+  private readonly history: History<State>
+  // Shared by reference with the view and the input handlers, so set() takes effect on their next event.
+  private readonly settings: Settings
+  private readonly detach: () => void
 
   /**
    * Mounts a graph in `root`; prefer {@link flow}.
    * @throws if `minZoom` is above `maxZoom`.
    */
-  constructor(private root: HTMLElement, options: FlowOptions = {}) {
+  constructor(private readonly root: HTMLElement, options: FlowOptions = {}) {
     super()
     this.settings = settle(options)
     this.history = new History(this.settings.history)
@@ -122,8 +40,7 @@ export class Flow extends EventTarget {
       changed: before => this.commit(before),
       undo: () => this.undo(),
       redo: () => this.redo(),
-      pointer: (type, hit, e) => this.fire(type, hit, e),
-      hover: hit => this.fire('hover', hit),
+      emit: (...event) => this.fire(...event),
     })
     this.mode(options.mode ?? 'view')
     this.lock()
@@ -140,15 +57,8 @@ export class Flow extends EventTarget {
     this.history.resize(this.settings.history)
     if (options.mode) this.mode(options.mode)
     this.lock()
-    this.view.update() // e.g. to show or hide the minimap
+    this.view.update()
     return this
-  }
-
-  // Lists the edit rights that are off on the root, so CSS can hide anchors and grab cursors.
-  private lock() {
-    const off = (['connect', 'move', 'remove'] as const).filter(right => !this.settings[right])
-    if (off.length) this.root.dataset.lock = off.join(' ')
-    else delete this.root.dataset.lock
   }
 
   /** Switches between read-only viewing and editing wires and positions. */
@@ -164,7 +74,7 @@ export class Flow extends EventTarget {
    * bringing the node back; only undo or `load()` restore it.
    */
   node(id: string) {
-    if (id.includes('.')) throw new Error(`betternodes: node id "${id}" must not contain "."`)
+    if (id.includes('.')) fail(`node id "${id}" must not contain "."`)
     let def = this.graph.nodes.get(id) ?? this.graph.trash.get(id)
     if (!def) {
       def = { id, title: id, x: 0, y: 0 }
@@ -180,10 +90,7 @@ export class Flow extends EventTarget {
    */
   group(id: string) {
     let def = this.graph.groups.get(id)
-    if (!def) {
-      def = { id, title: id }
-      this.graph.groups.set(id, def)
-    }
+    if (!def) this.graph.groups.set(id, (def = { id, title: id }))
     return new GroupBuilder(def, this.graph, this.view)
   }
 
@@ -192,7 +99,7 @@ export class Flow extends EventTarget {
    * @throws if there is no such group.
    */
   ungroup(id: string) {
-    if (!this.graph.groups.delete(id)) throw new Error(`betternodes: no group "${id}"`)
+    if (!this.graph.groups.delete(id)) fail(`no group "${id}"`)
     this.graph.setMembers(id, [])
     this.view.markGroups()
     return this
@@ -241,16 +148,12 @@ export class Flow extends EventTarget {
     return this
   }
 
-  private wire(from: string, to: string) {
-    if (!this.graph.edges.has(`${from}>${to}`)) throw new Error(`betternodes: no wire ${from} -> ${to}`)
-  }
-
   /**
    * Removes the wire from one anchor to another, e.g. `disconnect('a.e', 'b.w')`.
    * @throws if there is no such wire.
    */
   disconnect<F extends string, T extends string>(from: End<F>, to: End<T>) {
-    if (!this.graph.disconnect(from, to)) throw new Error(`betternodes: no wire ${from} -> ${to}`)
+    if (!this.graph.disconnect(from, to)) fail(`no wire ${from} -> ${to}`)
     this.view.update()
     return this
   }
@@ -261,7 +164,7 @@ export class Flow extends EventTarget {
    * @throws if there is no such node.
    */
   remove(id: string) {
-    if (!this.graph.remove(id)) throw new Error(`betternodes: no node "${id}"`)
+    if (!this.graph.remove(id)) fail(`no node "${id}"`)
     this.view.drop(id)
     return this
   }
@@ -297,57 +200,13 @@ export class Flow extends EventTarget {
     return this.travel('redo')
   }
 
-  private travel(direction: 'undo' | 'redo') {
-    const now = this.state()
-    const target = this.history[direction](now)
-    if (!target) return this
-    // Cleared first, so load() dropping selected nodes doesn't shrink the selection one event at a time.
-    this.view.select()
-    this.load(target)
-    this.emit(now)
-    return this
-  }
-
-  private commit(before: State) {
-    this.history.push(before)
-    this.emit(before)
-  }
-
   /**
-   * Subscribes to user edits in edit mode; never fired by programmatic calls.
-   * @param fn - gets the full new state, plus a diff of what this edit changed.
+   * Subscribes to an event; {@link FlowEvents} lists every type with its listener arguments.
    * @param options - `signal` unsubscribes when aborted, e.g. in a framework effect's cleanup.
    */
-  on(type: 'change', fn: (state: State, diff: Diff) => void, options?: { signal?: AbortSignal }): this
-  /**
-   * Subscribes to selection changes, whether the user or code made them, in both modes.
-   * @remarks Never fires when the selection stayed the same, so calling `select()` from `fn` is safe.
-   */
-  on(type: 'select', fn: (selection: Selection) => void, options?: { signal?: AbortSignal }): this
-  /**
-   * Subscribes to clicks, double clicks or context menu events on nodes, wires or the background,
-   * in both modes, whatever the options say.
-   * @remarks A click is a press that moved less than 4px, so drags never count. Call
-   * `event.preventDefault()` in a `contextmenu` listener to hide the browser's menu.
-   */
-  on(type: 'click' | 'dblclick' | 'contextmenu', fn: (hit: Hit, event: MouseEvent) => void, options?: { signal?: AbortSignal }): this
-  /** Subscribes to the pointer moving onto another node or wire; `{}` means the background or outside. */
-  on(type: 'hover', fn: (hit: Hit) => void, options?: { signal?: AbortSignal }): this
-  /** Subscribes to pan and zoom changes, whether the user or code made them; at most once per frame. */
-  on(type: 'viewport', fn: (viewport: Viewport) => void, options?: { signal?: AbortSignal }): this
-  on(type: string, fn: (...args: never[]) => void, options?: { signal?: AbortSignal }) {
-    this.addEventListener(type, e => fn(...(e as CustomEvent<never[]>).detail), options)
+  on<K extends keyof FlowEvents>(type: K, fn: (...args: FlowEvents[K]) => void, options?: { signal?: AbortSignal }) {
+    this.addEventListener(type, e => fn(...(e as CustomEvent<FlowEvents[K]>).detail), options)
     return this
-  }
-
-  private fire(type: string, ...args: unknown[]) {
-    this.dispatchEvent(new CustomEvent(type, { detail: args }))
-  }
-
-  private emit(before: State) {
-    this.view.update()
-    const state = this.state()
-    this.fire('change', state, diff(before, state))
   }
 
   /**
@@ -363,7 +222,7 @@ export class Flow extends EventTarget {
   /** The selected nodes or wire, as a copy. */
   selection(): Selection {
     const { nodes, wire } = this.view.selected
-    const edge = wire ? this.graph.edges.get(wire) : undefined
+    const edge = wire && this.graph.edges.get(wire)
     return edge ? { nodes: [], wire: [...edge] } : { nodes: [...nodes] }
   }
 
@@ -421,10 +280,6 @@ export class Flow extends EventTarget {
     return this.packets.send(from, to, opts)
   }
 
-  private known(ids: string[]) {
-    for (const id of ids) if (!this.graph.nodes.has(id)) throw new Error(`betternodes: no node "${id}"`)
-  }
-
   /** Unmounts the graph and removes all listeners from the root element. */
   destroy() {
     this.packets.clear()
@@ -437,5 +292,46 @@ export class Flow extends EventTarget {
   /** Current positions and wires, ready to persist. */
   state() {
     return this.graph.toState()
+  }
+
+  // Lists the edit rights that are off on the root, so CSS can hide anchors and grab cursors.
+  private lock() {
+    const off = RIGHTS.filter(right => !this.settings[right])
+    if (off.length) this.root.dataset.lock = off.join(' ')
+    else delete this.root.dataset.lock
+  }
+
+  private travel(direction: 'undo' | 'redo') {
+    const now = this.state()
+    const target = this.history[direction](now)
+    if (!target) return this
+    // Cleared first, so load() dropping selected nodes doesn't shrink the selection one event at a time.
+    this.view.select()
+    this.load(target)
+    this.emit(now)
+    return this
+  }
+
+  private commit(before: State) {
+    this.history.push(before)
+    this.emit(before)
+  }
+
+  private emit(before: State) {
+    this.view.update()
+    const state = this.state()
+    this.fire('change', state, diff(before, state))
+  }
+
+  private fire(...[type, ...args]: Emitted<FlowEvents>) {
+    this.dispatchEvent(new CustomEvent(type, { detail: args }))
+  }
+
+  private wire(from: string, to: string) {
+    if (!this.graph.edges.has(wireKey(from, to))) fail(`no wire ${from} -> ${to}`)
+  }
+
+  private known(ids: string[]) {
+    for (const id of ids) if (!this.graph.nodes.has(id)) fail(`no node "${id}"`)
   }
 }

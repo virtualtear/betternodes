@@ -30,6 +30,10 @@ g.set({ mode: 'locked' })
 
 g.on('click', (hit, e) => [hit.node, hit.wire?.[0], e.clientX])
 g.on('hover', hit => hit.node)
+g.on('change', (state, diff) => [state.positions, diff.added])
+g.on('select', ({ nodes, wire }) => [nodes.length, wire?.[1]])
+// @ts-expect-error select listeners get a Selection
+g.on('select', (selection: string) => selection)
 g.on('viewport', v => v.zoom).viewport({ zoom: 2 }).zoomBy(1.2).fit('a', 'b')
 const zoom: number = g.viewport().zoom
 g.connect('a.e', 'b.w', { class: 'error' }).wireClass('a.e', 'b.w', 'ok', 'bn-two-way')

@@ -1,6 +1,11 @@
-import { nodeOf, type Graph } from '../model/graph'
+import { nodeOf, type Graph } from '../../model/graph'
+import type { View } from '../view'
 import type { Dot } from './dots'
-import type { View } from './view'
+
+// World px per second.
+const SPEED = 240
+// Longest frame step in ms: a background tab must not teleport packets.
+const MAX_STEP = 100
 
 /** Options for {@link Flow.send}. */
 export interface SendOptions {
@@ -37,13 +42,13 @@ interface Packet {
 
 /** Packets travelling along wires; advanced once per animation frame while any are in flight. */
 export class Packets {
-  private live = new Set<Packet>()
+  private readonly live = new Set<Packet>()
   private last = 0
   // Outgoing wires per node, rebuilt only when the graph changes: many packets plan hops per frame.
-  private outs = new Map<string, [wire: string, next: string][]>()
+  private readonly outs = new Map<string, [wire: string, next: string][]>()
   private outsVersion = -1
 
-  constructor(private view: View, private graph: Graph) {
+  constructor(private readonly view: View, private readonly graph: Graph) {
     view.onFrame = now => this.step(now)
   }
 
@@ -73,7 +78,7 @@ export class Packets {
       send.arrived.push(node)
       return
     }
-    const wire = this.hop(node, send.to!)
+    const wire = this.hop(node, send.to)
     if (wire) this.launch(send, wire)
   }
 
@@ -144,7 +149,7 @@ export class Packets {
   }
 
   private step(now: number) {
-    const dt = Math.min(100, now - this.last) / 1000 // cap: a background tab must not teleport packets
+    const dt = Math.min(MAX_STEP, now - this.last) / 1000
     this.last = now
     // Packets that reached a node carry on after the loop, so new hops don't join this step.
     const ends: [Packet, string | undefined, boolean][] = []
@@ -158,11 +163,9 @@ export class Packets {
       const track = this.view.track(p.wire)
       if (!track) continue // wire not drawn yet
       const { length } = track
-      p.t += length ? ((p.send.opts.speed ?? 240) * dt) / length : 1
+      p.t += length ? ((p.send.opts.speed ?? SPEED) * dt) / length : 1
       if (p.t >= 1) ends.push([p, nodeOf(edge[1]), false])
-      else {
-        this.view.dots.move(p.dot, ...track.at(p.t * length))
-      }
+      else this.view.dots.move(p.dot, ...track.at(p.t * length))
     }
     for (const [p, node, replan] of ends) this.moveOn(p, node, replan)
     if (this.live.size) this.view.update()
