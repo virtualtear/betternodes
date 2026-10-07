@@ -11,6 +11,14 @@ export interface NodeDef {
   placed?: boolean
 }
 
+/** A group as defined in code: a titled frame drawn around its member nodes. */
+export interface GroupDef {
+  id: string
+  title: string
+  /** Extra CSS classes on the frame. */
+  classes?: string[]
+}
+
 /** Anchor names: a node's corners and edge midpoints, by compass direction. */
 export type Anchor = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 
@@ -79,6 +87,9 @@ export class Graph {
   labels = new Map<string, string>()
   // Extra CSS classes on wires, by `from>to` key, set from code; they outlive their wire like notes.
   classes = new Map<string, string[]>()
+  groups = new Map<string, GroupDef>()
+  /** Group id per grouped node id, so a node is in at most one group. Kept for deleted nodes too. */
+  memberOf = new Map<string, string>()
   /** Bumped on every change to wires or nodes, so derived lookups know when to rebuild. */
   version = 0
 
@@ -141,6 +152,24 @@ export class Graph {
     if (names.length) this.classes.set(`${from}>${to}`, [...names])
     else this.classes.delete(`${from}>${to}`)
     this.version++
+  }
+
+  /** Makes `ids` the members of `group`, taking them out of any other group. */
+  setMembers(group: string, ids: string[]) {
+    for (const [id, g] of this.memberOf) if (g === group) this.memberOf.delete(id)
+    for (const id of ids) this.memberOf.set(id, group)
+  }
+
+  /** Member ids of every group that has members shown. */
+  members() {
+    const out = new Map<string, string[]>()
+    for (const [id, g] of this.memberOf) {
+      if (!this.nodes.has(id)) continue
+      const list = out.get(g)
+      if (list) list.push(id)
+      else out.set(g, [id])
+    }
+    return out
   }
 
   /** @returns false if there was no such wire. */

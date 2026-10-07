@@ -12,6 +12,8 @@ export class Minimap {
   readonly el = svg('svg', 'bn-minimap')
   private visible = svg('rect', 'bn-mini-view')
   private rects = new Map<string, SVGRectElement>()
+  // Group frames, redrawn whenever any node moved.
+  private frames = svg('g')
   // Bounds of all nodes in world px, kept between frames in which no node moved; none without nodes.
   private nodes?: Rect
   // Every node needs drawing, e.g. right after the minimap was turned on.
@@ -20,7 +22,7 @@ export class Minimap {
   private held = false
 
   constructor(private view: View) {
-    this.el.append(this.visible)
+    this.el.append(this.frames, this.visible)
     view.root.append(this.el)
   }
 
@@ -48,6 +50,11 @@ export class Minimap {
         corners.push([x, y], [x + w, y + h])
       }
       this.nodes = corners.length ? bounds(corners) : undefined
+      this.frames.replaceChildren(...[...this.view.frames().values()].map(([x, y, width, height]) => {
+        const rect = svg('rect', 'bn-mini-group')
+        attrs(rect, { x, y, width, height })
+        return rect
+      }))
     }
     this.full = false
     const { x, y, k, width, height } = this.view

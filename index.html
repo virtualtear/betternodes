@@ -88,6 +88,7 @@
       f.node('mail').title('Send mail').content(note).class('error')
       f.node('log').title('Log')
       f.connect('hook', 'if').connect('if', 'mail', { label: 'true' }).connect('if', 'log', { label: 'false' })
+      f.group('output').title('Output').nodes('mail', 'log')
 
       // Image service: custom content that changes at runtime. Clicking the node swaps in another
       // photo. Photos differ in size on purpose: the node resizes, its wires re-route, and a

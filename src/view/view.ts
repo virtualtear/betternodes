@@ -1,5 +1,5 @@
 import { ANCHORS, anchorOf, nodeOf, type Graph, type NodeDef } from '../model/graph'
-import { GRID, type Point, type Rect } from '../geometry/rect'
+import { GRID, bounds, frameAround, type Point, type Rect } from '../geometry/rect'
 import { route } from '../geometry/route'
 import { curve } from '../geometry/svg-path'
 import { layout } from '../layout/columns'
@@ -78,6 +78,9 @@ export class View {
   // border stays 1px at any zoom.
   private bandRect?: Rect
   private band = h('div', 'bn-band')
+  // Group frames by group id, and whether a group definition changed since the last frame.
+  private groupEls = new Map<string, HTMLElement>()
+  private regroup = false
 
   // Whether we made the root focusable, so destroy() knows to undo it.
   private tabbed: boolean
@@ -120,6 +123,7 @@ export class View {
       el.remove()
     }
     this.mini?.drop(id)
+    if (this.graph.memberOf.has(id)) this.regroup = true
     for (const map of [this.els, this.sizes]) map.delete(id)
     for (const set of [this.dirty, this.moved, this.stale]) set.delete(id)
     if (this.selected.nodes.has(id)) this.select([...this.selected.nodes].filter(other => other !== id))
@@ -131,6 +135,19 @@ export class View {
     if (!this.graph.nodes.has(id)) return // deleted: its definition can change, but it isn't shown
     this.dirty.add(id)
     this.update()
+  }
+
+  /** Schedules redrawing the group frames, e.g. after a title or membership changed. */
+  markGroups() {
+    this.regroup = true
+    this.update()
+  }
+
+  /** Frame rect in world px of every group with members shown. */
+  frames() {
+    const out = new Map<string, Rect>()
+    for (const [g, ids] of this.graph.members()) out.set(g, frameAround(ids.map(id => this.box(id))))
+    return out
   }
 
   /** Schedules a position and class update; no rebuild, so cheap enough for every drag frame. */
@@ -279,6 +296,7 @@ export class View {
     for (const id of this.stale) if (this.measure(id)) this.moved.add(id)
     this.autoLayout()
     this.pullApart()
+    if (this.regroup || this.moved.size) this.renderGroups()
     const fitted = this.fitting && this.fitAll()
     this.toggleMinimap()
     this.mini?.render(this.moved, this.panned || fitted)
@@ -371,14 +389,10 @@ export class View {
     // Fitting nodes that got deleted meanwhile is dropped, not kept for when undo brings them back.
     if (this.fitIds && !ids.length) this.fitting = false
     if (!ids.length || !w || !h) return false
-    let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity]
-    for (const id of ids) {
-      const [x, y, bw, bh] = this.box(id)
-      x0 = Math.min(x0, x)
-      y0 = Math.min(y0, y)
-      x1 = Math.max(x1, x + bw)
-      y1 = Math.max(y1, y + bh)
-    }
+    // The whole graph includes the group frames, so their titles stay in view.
+    const rects = [...ids.map(id => this.box(id)), ...(this.fitIds ? [] : this.frames().values())]
+    const [x0, y0, bw, bh] = bounds(rects.flatMap(([x, y, w, h]): Point[] => [[x, y], [x + w, y + h]]))
+    const [x1, y1] = [x0 + bw, y0 + bh]
     const pad = 40
     const { minZoom, maxZoom } = this.settings
     const k = Math.max(minZoom, Math.min(1, maxZoom, (w - 2 * pad) / (x1 - x0), (h - 2 * pad) / (y1 - y0)))
@@ -386,6 +400,36 @@ export class View {
     this.fitting = false
     this.applyViewport()
     return true
+  }
+
+  // Frames sit right before the wire layer: behind wires and nodes. Only their titles take pointer
+  // events, so a press inside a frame acts on the background.
+  private renderGroups() {
+    this.regroup = false
+    const frames = this.frames()
+    for (const [id, el] of this.groupEls) {
+      if (this.graph.groups.has(id)) continue
+      el.remove()
+      this.groupEls.delete(id)
+    }
+    for (const g of this.graph.groups.values()) {
+      let el = this.groupEls.get(g.id)
+      if (!el) {
+        el = h('div', '')
+        el.dataset.group = g.id
+        el.append(h('div', 'bn-group-title'))
+        this.groupEls.set(g.id, el)
+        this.svg.before(el)
+      }
+      // Every drag frame gets here, so only real changes are written.
+      const className = ['bn-group', ...g.classes ?? []].join(' ')
+      if (el.className !== className) el.className = className
+      if (el.firstChild!.textContent !== g.title) el.firstChild!.textContent = g.title
+      const [x, y, width, height] = frames.get(g.id) ?? []
+      const style = x === undefined ? { display: 'none' }
+        : { display: '', transform: `translate(${x}px, ${y}px)`, width: `${width}px`, height: `${height}px` }
+      for (const [name, value] of Object.entries(style)) if (el.style.getPropertyValue(name) !== value) el.style.setProperty(name, value)
+    }
   }
 
   private renderNode(n: NodeDef) {

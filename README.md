@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen.svg)
-![Size: 12.6 kB min+gzip](https://img.shields.io/badge/size-12.6%20kB%20min%2Bgzip-informational.svg)
+![Size: 13.5 kB min+gzip](https://img.shields.io/badge/size-13.5%20kB%20min%2Bgzip-informational.svg)
 ![TypeScript](https://img.shields.io/badge/types-TypeScript-3178c6.svg)
 
 A small, framework-agnostic node graph viewer and editor. Define nodes and wires in code with a
@@ -21,7 +21,7 @@ f.connect('hook', 'mail', { label: 'new order' })
 - [Features](#features)
 - [Installation](#installation)
 - [Quick start](#quick-start)
-- [Guide](#guide): modes, anchors, wires, layout, state, packets, custom content, frameworks
+- [Guide](#guide): modes, anchors, wires, layout, groups, state, packets, custom content, frameworks
 - [API reference](#api-reference)
 - [Editor controls](#editor-controls)
 - [Persistence](#persistence)
@@ -35,7 +35,7 @@ f.connect('hook', 'mail', { label: 'new order' })
 
 ## Features
 
-- **Zero runtime dependencies**, about 12.6 kB minified and gzipped (plus 1.5 kB of CSS).
+- **Zero runtime dependencies**, about 13.5 kB minified and gzipped (plus 1.7 kB of CSS).
 - **Plain DOM and SVG**, so it works with React, Vue, Svelte or no framework at all. Node content
   is any element you hand it.
 - **View and edit modes.** Read-only by default; in edit mode users drag wires between eight
@@ -47,6 +47,7 @@ f.connect('hook', 'mail', { label: 'new order' })
   other, even when their content grows.
 - **Animated packets** that travel along the wires to show data flowing through the graph.
 - **JSON state and diffs** for every user edit, ready to save to `localStorage` or a REST API.
+- **Groups:** titled frames around related nodes that drag as one, kept clear of other nodes.
 - **Minimap** for finding your way around big graphs.
 - **Smooth with 1000+ nodes:** DOM writes are batched into one animation frame, and dragging only
   touches the moved nodes and the wires near them.
@@ -186,6 +187,31 @@ up closer than half a grid step (10px) to another node; then it settles at the n
 keeps that distance. In a dragged group, only the nodes that end up too close to others move. Node
 sizes don't follow the grid, so this rounds the gap to the grid: one step of space counts even
 when it measures 19.3px.
+
+### Groups
+
+A group draws a titled frame around some nodes, e.g. the stages of a workflow:
+
+```ts
+f.group('intake').title('Intake').nodes('hook', 'if')
+f.group('intake').class('running')   // CSS classes on the frame, like nodes
+f.ungroup('intake')                  // removes the frame, keeps the nodes
+```
+
+The frame keeps 20px around its members, plus a title line on top, and follows them as they move
+or grow. Pressing the title selects the members; dragging it in edit mode moves them all as one
+edit. Inside a frame, everywhere but the title acts like the background, so you can still pan or
+draw a selection box there.
+
+Like node titles, groups belong to your code, not to `state()`. A node is in one group at most, and
+`.nodes()` replaces the members. Ids of nodes you haven't defined yet, or that the user deleted,
+are fine: the frame shows whichever members exist and hides while there are none.
+
+Auto-layout gives each group a band of its own, so no frame covers other nodes. When the user drops
+nodes, they settle outside other groups' frames, and a dragged group settles where its whole frame
+has room. Limits: positions from `at()` or `load()` are not checked against frames, a member
+dragged away on its own stretches its frame over whatever lies between, wires route through
+frames, and groups don't nest or collapse.
 
 ### State
 
@@ -352,6 +378,18 @@ All builder methods return the builder, so calls chain.
 `state().removed`, so a saved state keeps it deleted after a reload even though your code still
 defines it. Calling `f.node(id)` for a deleted node does not bring it back; undo or `load()` do.
 
+### Groups: `f.group(id)`
+
+Returns a builder for a new or existing group, see [Groups](#groups).
+
+| Method | Description |
+| --- | --- |
+| `.title(text)` | Frame title (plain text). Defaults to the id. |
+| `.nodes(...ids)` | The members, replacing earlier ones; each is taken out of any other group. |
+| `.class(...names)` | Extra CSS classes on the frame, replacing earlier ones. |
+
+`f.ungroup(id)` removes a group's frame and keeps its nodes; it throws for unknown ids.
+
 ### Wires
 
 | Method | Description |
@@ -415,7 +453,8 @@ f.on('contextmenu', (hit, event) => {
 | `hover` | `(hit)` | The pointer moves onto another node or wire, or off them (`{}`). |
 | `viewport` | `({ x, y, zoom })` | Pan or zoom changed, by the user or by code; at most once per frame. |
 
-`hit` is `{ node }`, `{ wire: [from, to] }`, or `{}` for the background. These events fire in both
+`hit` is `{ node }`, `{ wire: [from, to] }`, `{ group }` for a frame's title, or `{}` for the
+background. These events fire in both
 modes and whatever the [options](#options) say, so `select: false` plus `click` lets you build your
 own selection.
 
@@ -441,7 +480,7 @@ reverted too.
 
 ### Exported types
 
-`Flow`, `NodeBuilder`, `FlowOptions`, `State`, `Diff`, `Edge`, `Anchor`, `End`, `Selection`, `Hit`,
+`Flow`, `NodeBuilder`, `GroupBuilder`, `FlowOptions`, `State`, `Diff`, `Edge`, `Anchor`, `End`, `Selection`, `Hit`,
 `Viewport` and `SendOptions`.
 
 ## Editor controls
@@ -453,6 +492,7 @@ reverted too.
 | Select | Click a node or wire; in view mode only nodes. Esc or a click on empty space deselects. |
 | Select several nodes | Shift+click a node to add or remove it. Shift+drag on the background draws a box; every node it touches is added. |
 | Move nodes | Drag a node. If it is selected, every selected node moves along. Positions snap to the 20px grid. Nodes can pass over each other while you drag. A node stays where you drop it unless that is closer than 10px to another node; then it moves to the nearest spot with room. Clicking one node of a group selects just that node. |
+| Move a group | Drag its frame's title. Pressing the title selects the group's nodes. |
 | Minimap | With the `minimap` option, click or drag in the overview to move the view there. |
 | Scroll while dragging | While dragging a node, a wire end or a selection box, move the pointer near the edge of the graph; the view scrolls that way, faster closer to the edge. |
 | New wire | Hover a node, drag from one of its connection points to another node. Points show at 50% zoom or more. |
@@ -499,6 +539,8 @@ Override these CSS variables on `.bn` or on your root element:
 | `--bn-packet` | `--bn-accent` | Packet dots (`.bn-packet`) |
 | `--bn-radius` | `8px` | Node corner radius |
 | `--bn-anchor` | `10px` | Connection point size |
+| `--bn-group-bg` | `#1f232808` | Group frame background |
+| `--bn-group-border` | `#c9ced6` | Group frame outline |
 | `--bn-minimap-bg` | `#fffc` | Minimap background |
 | `--bn-minimap-node` | `#c9ced6` | Nodes in the minimap |
 | `--bn-minimap-view` | `--bn-accent` | Visible-area box in the minimap |
@@ -506,7 +548,8 @@ Override these CSS variables on `.bn` or on your root element:
 Nodes are `.bn-node` elements with a `.bn-title`; style them, or the classes you add with
 `.class()`, like any other HTML. Selected nodes and wires get `.bn-selected`, and the selection box
 is a `.bn-band` element. Wire notes are SVG `.bn-label` text with a halo in `--bn-bg`. Each wire is
-a `<g data-wire>` holding a `.bn-wire` path, and gets the classes from `wireClass()`. The minimap is
+a `<g data-wire>` holding a `.bn-wire` path, and gets the classes from `wireClass()`. Group frames are
+`.bn-group` elements with a `.bn-group-title`, plus the classes from `.class()`. The minimap is
 an SVG `.bn-minimap` (place or size it with CSS) whose `.bn-mini-node` rects carry each node's
 classes, so `.bn-mini-node.error` can colour a status. A packet
 sent with `{ class }` gets that class next to `.bn-packet`:
@@ -606,7 +649,7 @@ src/
   model/            graph data, saved state, diffs, undo history
   geometry/         pure math: rects, spatial hash, min-heap, wire routing, lanes, SVG path data
   layout/           pure node placement: auto-layout columns, pulling overlaps apart
-  view/             DOM: frame scheduler and nodes, wires, pointer and keyboard input, packets
+  view/             DOM: frame scheduler and nodes, wires, group frames, minimap, input, packets
 test/               browser tests, plus compile-time type checks in types.check.ts
 bench/              performance benchmarks with budgets
 index.html          demo page served by `npm run dev`

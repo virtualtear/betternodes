@@ -19,6 +19,8 @@ export interface Hit {
   node?: string
   /** A copy of the wire. */
   wire?: Edge
+  /** A group, hit on its frame's title. */
+  group?: string
 }
 
 // Follows one pointer gesture on window, so moves and the drop register wherever the pointer goes.
@@ -102,6 +104,8 @@ export function attach(view: View, graph: Graph, { changed, undo, redo, pointer,
   const hitAt = (el: Element): Hit => {
     const node = el.closest<HTMLElement>('[data-node]')?.dataset.node
     if (node) return { node }
+    const group = el.closest<HTMLElement>('[data-group]')?.dataset.group
+    if (group) return { group }
     const edge = graph.edges.get(el.closest<SVGElement>('[data-wire]')?.dataset.wire ?? '')
     return edge ? { wire: [...edge] } : {}
   }
@@ -165,13 +169,29 @@ export function attach(view: View, graph: Graph, { changed, undo, redo, pointer,
   }
 
   // Nodes may pass over each other while moving, but never stay on top of one another: moved
-  // `nodes` settle at the nearest free spot. Reports an edit if any ended up off its `starts`.
+  // `nodes` settle at the nearest free spot. A group moved as a whole settles as one block, its
+  // frame, and frames of groups that kept still count as taken. Reports an edit if any node ended
+  // up off its `starts`.
   const land = (nodes: NodeDef[], starts: number[][], before: State) => {
     const moved = new Set(nodes.map(n => n.id))
-    const others = [...graph.nodes.keys()].filter(id => !moved.has(id)).map(id => view.box(id))
-    freeSpots(nodes.map(n => view.box(n.id)), others, GRID, GRID).forEach(([x, y], i) => {
-      Object.assign(nodes[i], { x, y })
-      view.place(nodes[i].id)
+    const [members, frames] = [graph.members(), view.frames()]
+    const units: { ids: string[]; rect: Rect }[] = []
+    const others: Rect[] = []
+    for (const [g, ids] of members) {
+      const count = ids.filter(id => moved.has(id)).length
+      if (count === ids.length) units.push({ ids, rect: frames.get(g)! })
+      else if (!count) others.push(frames.get(g)!)
+    }
+    const whole = new Set(units.flatMap(u => u.ids))
+    for (const id of moved) if (!whole.has(id)) units.push({ ids: [id], rect: view.box(id) })
+    for (const id of graph.nodes.keys()) if (!moved.has(id)) others.push(view.box(id))
+    freeSpots(units.map(u => u.rect), others, GRID, GRID).forEach(([x, y], i) => {
+      const [dx, dy] = [x - units[i].rect[0], y - units[i].rect[1]]
+      for (const id of units[i].ids) {
+        const n = graph.nodes.get(id)!
+        Object.assign(n, { x: n.x + dx, y: n.y + dy })
+        view.place(id)
+      }
     })
     if (nodes.some((n, i) => n.x !== starts[i][0] || n.y !== starts[i][1])) changed(before)
   }
@@ -242,8 +262,11 @@ export function attach(view: View, graph: Graph, { changed, undo, redo, pointer,
   const press = (e: PointerEvent) => {
     const target = e.target as Element
     const node = target.closest<HTMLElement>('[data-node]')?.dataset.node
-    // View mode: every drag pans, a click selects a node or clears the selection.
-    if (root.dataset.mode !== 'edit') return pan(e, () => s.select && view.select(node ? [node] : []))
+    // A frame's title stands for the group's members.
+    const group = target.closest<HTMLElement>('[data-group]')?.dataset.group
+    const members = group ? graph.members().get(group) ?? [] : []
+    // View mode: every drag pans, a click selects a node or a group, or clears the selection.
+    if (root.dataset.mode !== 'edit') return pan(e, () => s.select && view.select(node ? [node] : members))
     const wire = target.closest<SVGElement>('[data-wire]')?.dataset.wire
     // Without `connect`, an anchor is just part of its node.
     const anchor = s.connect && target.closest<HTMLElement>('[data-anchor]')?.dataset.anchor
@@ -254,6 +277,11 @@ export function attach(view: View, graph: Graph, { changed, undo, redo, pointer,
     if (wire) {
       if (s.select) view.select([], wire)
       return s.connect ? grabWire(e, wire) : pan(e, () => {})
+    }
+    // Pressing a frame's title selects the members, dragging it moves them all.
+    if (group) {
+      if (s.select) view.select(members)
+      return s.move && members.length ? dragNodes(e, members[0], new Set(members)) : pan(e, () => {})
     }
     if (!node) return e.shiftKey && s.select ? marquee(e) : pan(e, () => s.select && view.select())
     const { nodes } = view.selected

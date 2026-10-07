@@ -9,6 +9,15 @@ export const GRID = 20
 
 export const snap = (v: number, grid = GRID) => Math.round(v / grid) * grid
 
+/** Room a group frame leaves around its members in world px: on the sides and bottom, and on top for its title. */
+export const FRAME = { side: GRID, top: 2 * GRID }
+
+/** A group frame around member rects. */
+export function frameAround(rects: Rect[]): Rect {
+  const [x, y, w, h] = bounds(rects.flatMap(([x, y, w, h]): Point[] => [[x, y], [x + w, y + h]]))
+  return [x - FRAME.side, y - FRAME.top, w + 2 * FRAME.side, h + FRAME.side + FRAME.top]
+}
+
 // Index access, not destructuring: this runs millions of times in routing and free-spot searches.
 /**
  * Whether two rects' interiors overlap; touching edges don't count. With a `margin`, anything

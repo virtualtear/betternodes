@@ -9,6 +9,8 @@
   --bn-packet: var(--bn-accent);
   --bn-radius: 8px;
   --bn-anchor: 10px;
+  --bn-group-bg: #1f232808;
+  --bn-group-border: #c9ced6;
   --bn-minimap-bg: #fffc;
   --bn-minimap-node: #c9ced6;
   --bn-minimap-view: var(--bn-accent);
@@ -146,6 +148,34 @@
 .bn[data-lock~='connect'] .bn-hit,
 .bn[data-lock~='connect'] .bn-label,
 .bn[data-mode='edit'][data-lock~='move'] .bn-node { cursor: auto; }
+
+/* Group frames: behind wires and nodes, and transparent to the pointer except for the title. */
+.bn-group {
+  position: absolute;
+  inset: 0 auto auto 0;
+  box-sizing: border-box;
+  border: 1px dashed var(--bn-group-border);
+  border-radius: calc(var(--bn-radius) * 1.5);
+  background: var(--bn-group-bg);
+  pointer-events: none;
+}
+
+.bn-group-title {
+  position: absolute;
+  max-width: calc(100% - 24px);
+  padding: 8px 12px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: auto;
+}
+
+.bn[data-mode='edit'] .bn-group-title { cursor: grab; }
+.bn[data-mode='edit'][data-lock~='move'] .bn-group-title { cursor: auto; }
+.bn-mini-group { fill: none; stroke: var(--bn-group-border); vector-effect: non-scaling-stroke; }
 
 /* Overview in the corner; nodes keep their status classes, e.g. .bn-mini-node.error. */
 .bn-minimap {

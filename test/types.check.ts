@@ -41,3 +41,8 @@ g.on('drag', () => {})
 // @ts-expect-error unknown anchor
 g.wireClass('a.x', 'b', 'ok')
 void zoom
+
+g.group('stage').title('Stage 1').nodes('a', 'b').class('running')
+g.ungroup('stage').on('click', ({ group }) => group?.toUpperCase())
+// @ts-expect-error node ids are strings
+g.group('stage').nodes(1)

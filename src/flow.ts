@@ -1,4 +1,4 @@
-import { Graph, diff, type Anchor, type Diff, type Edge, type NodeDef, type State } from './model/graph'
+import { Graph, diff, type Anchor, type Diff, type Edge, type GroupDef, type NodeDef, type State } from './model/graph'
 import { History } from './model/history'
 import { settle, type FlowOptions, type Settings } from './options'
 import { attach, type Hit } from './view/interact'
@@ -59,6 +59,39 @@ export class NodeBuilder {
   /** Mounts custom markup below the title; render it with any framework. */
   content(el: HTMLElement) {
     return this.set({ content: el })
+  }
+}
+
+/** Fluent handle for defining one group: a titled frame drawn around its member nodes. */
+export class GroupBuilder {
+  constructor(private def: GroupDef, private graph: Graph, private view: View) {}
+
+  private set(patch: Partial<GroupDef>) {
+    Object.assign(this.def, patch)
+    this.view.markGroups()
+    return this
+  }
+
+  /** Sets the frame's title text. */
+  title(text: string) {
+    return this.set({ title: text })
+  }
+
+  /** Sets extra CSS classes on the frame, replacing earlier ones. */
+  class(...names: string[]) {
+    return this.set({ classes: names })
+  }
+
+  /**
+   * Makes these nodes the members, replacing earlier ones. A node is in at most one group, so this
+   * takes it out of any other.
+   * @remarks Ids of nodes not defined yet, or deleted by the user, are fine: the frame shows
+   * whichever members exist, and hides while there are none.
+   */
+  nodes(...ids: string[]) {
+    this.graph.setMembers(this.def.id, ids)
+    this.view.markGroups()
+    return this
   }
 }
 
@@ -139,6 +172,30 @@ export class Flow extends EventTarget {
       this.view.mark(id)
     }
     return new NodeBuilder(def, this.view)
+  }
+
+  /**
+   * Defines a group, or returns a builder for an existing one; see {@link GroupBuilder}.
+   * @remarks Groups belong to your code like node titles: they are not part of `state()`.
+   */
+  group(id: string) {
+    let def = this.graph.groups.get(id)
+    if (!def) {
+      def = { id, title: id }
+      this.graph.groups.set(id, def)
+    }
+    return new GroupBuilder(def, this.graph, this.view)
+  }
+
+  /**
+   * Removes a group's frame; its nodes stay.
+   * @throws if there is no such group.
+   */
+  ungroup(id: string) {
+    if (!this.graph.groups.delete(id)) throw new Error(`betternodes: no group "${id}"`)
+    this.graph.setMembers(id, [])
+    this.view.markGroups()
+    return this
   }
 
   /**
