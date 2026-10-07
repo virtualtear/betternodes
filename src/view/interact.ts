@@ -143,8 +143,9 @@ export function attach(view: View, graph: Graph, { changed, undo, redo, pointer,
     }, signal, borderPan())
   }
 
-  // Moves `group` by one offset, chosen so `grabbed` snaps to the grid. Offsets come from world
-  // points, so zooming or edge panning mid-drag keeps the nodes under the pointer.
+  // Moves `group` by one offset that follows the pointer freely; on the drop it is rounded so
+  // `grabbed` lands on the grid. Offsets come from world points, so zooming or edge panning
+  // mid-drag keeps the nodes under the pointer.
   const dragNodes = (e: PointerEvent, grabbed: string, group: Set<string>) => {
     const nodes = [...group].map(id => graph.nodes.get(id)!)
     const starts = nodes.map(n => [n.x, n.y])
@@ -153,15 +154,19 @@ export function attach(view: View, graph: Graph, { changed, undo, redo, pointer,
     const [sx, sy] = [e.clientX, e.clientY]
     const before = graph.toState()
     view.dragging = group
+    const shift = (dx: number, dy: number) => nodes.forEach((n, i) => {
+      Object.assign(n, { x: starts[i][0] + dx, y: starts[i][1] + dy, placed: true })
+      view.place(n.id)
+    })
+    let [dx, dy] = [0, 0]
     gesture(e => {
       const [wx, wy] = view.toWorld(e.clientX, e.clientY)
-      const [dx, dy] = s.snap ? [snap(gx + wx - px) - gx, snap(gy + wy - py) - gy] : [wx - px, wy - py]
-      nodes.forEach((n, i) => {
-        Object.assign(n, { x: starts[i][0] + dx, y: starts[i][1] + dy, placed: true })
-        view.place(n.id)
-      })
+      dx = wx - px
+      dy = wy - py
+      shift(dx, dy)
     }, e => {
       view.dragging = new Set()
+      if (s.snap) shift(snap(gx + dx) - gx, snap(gy + dy) - gy)
       land(nodes, starts, before)
       // A click on one node of a group selects just that node.
       if (s.select && e.type === 'pointerup' && Math.hypot(e.clientX - sx, e.clientY - sy) < SLOP) view.select([grabbed])

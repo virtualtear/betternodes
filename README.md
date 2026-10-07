@@ -350,7 +350,7 @@ f.set({ mode: 'edit', connect: false, remove: false })
 | `connect` | `true` | Edit mode: drawing new wires and moving wire ends. When off, connection points are hidden. |
 | `move` | `true` | Edit mode: dragging nodes. When off, dragging a node pans, as in view mode. |
 | `remove` | `true` | Edit mode: deleting nodes and wires with Delete or Backspace. |
-| `snap` | `true` | Snapping dragged nodes to the 20px grid. |
+| `snap` | `true` | Snapping dropped nodes to the 20px grid. While dragged, nodes follow the pointer freely. |
 | `minimap` | `false` | An overview of the whole graph in the bottom-right corner. Click or drag in it to pan (unless `pan` is off). |
 | `canConnect` | allows all | `(from, to) => boolean`, asked before a wire the user draws or reconnects is made. Ends come as stored: `'node.anchor'`, or a bare id for a floating end. Return false to reject it. |
 
@@ -491,7 +491,7 @@ reverted too.
 | Zoom | Mouse wheel or trackpad pinch, centered on the pointer. |
 | Select | Click a node or wire; in view mode only nodes. Esc or a click on empty space deselects. |
 | Select several nodes | Shift+click a node to add or remove it. Shift+drag on the background draws a box; every node it touches is added. |
-| Move nodes | Drag a node. If it is selected, every selected node moves along. Positions snap to the 20px grid. Nodes can pass over each other while you drag. A node stays where you drop it unless that is closer than 10px to another node; then it moves to the nearest spot with room. Clicking one node of a group selects just that node. |
+| Move nodes | Drag a node. If it is selected, every selected node moves along. Nodes follow the pointer freely, lifted, and snap to the 20px grid when you drop them. They can pass over each other while you drag. A node stays where you drop it unless that is closer than 10px to another node; then it moves to the nearest spot with room. Clicking one node of a group selects just that node. |
 | Move a group | Drag its frame's title. Pressing the title selects the group's nodes. |
 | Minimap | With the `minimap` option, click or drag in the overview to move the view there. |
 | Scroll while dragging | While dragging a node, a wire end or a selection box, move the pointer near the edge of the graph; the view scrolls that way, faster closer to the edge. |

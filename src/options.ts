@@ -63,7 +63,7 @@ export interface FlowOptions {
    */
   remove?: boolean
   /**
-   * Snapping dragged nodes to the 20px grid.
+   * Snapping dropped nodes to the 20px grid; while dragged they follow the pointer freely.
    * @defaultValue `true`
    */
   snap?: boolean

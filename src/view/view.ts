@@ -290,7 +290,7 @@ export class View {
     for (const id of this.dirty) this.renderNode(this.graph.nodes.get(id)!)
     for (const id of this.moved) {
       const n = this.graph.nodes.get(id)!
-      this.els.get(id)!.className = ['bn-node', ...n.classes ?? []].join(' ')
+      this.els.get(id)!.className = ['bn-node', ...n.classes ?? [], ...(this.dragging.has(id) ? ['bn-dragging'] : [])].join(' ')
       this.move(n, n.x, n.y)
     }
     for (const id of this.stale) if (this.measure(id)) this.moved.add(id)

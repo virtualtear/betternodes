@@ -506,3 +506,18 @@ test('edit mode: a node nudged onto another settles next to it', async () => {
   const b = el.querySelector('[data-node="b"]')!.getBoundingClientRect()
   expect(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top).toBe(true)
 })
+
+test('edit mode: a dragged node follows the pointer freely, lifted, and snaps to the grid on drop', async () => {
+  const { el, f } = await setup('edit')
+  const node = el.querySelector('[data-node="a"]')!
+  const { x, y } = center(title(el, 'a'))
+  pointer('pointerdown', title(el, 'a'))
+  pointer('pointermove', { x: x + 7, y: y + 13 })
+  await frame()
+  expect(f.state().positions.a).toEqual([27, 33])
+  expect(node.classList.contains('bn-dragging')).toBe(true)
+  pointer('pointerup', { x: x + 7, y: y + 13 })
+  await frame()
+  expect(f.state().positions.a).toEqual([20, 40])
+  expect(node.classList.contains('bn-dragging')).toBe(false)
+})
