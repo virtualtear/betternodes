@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen.svg)
-![Size: 10.7 kB min+gzip](https://img.shields.io/badge/size-10.7%20kB%20min%2Bgzip-informational.svg)
+![Size: 11.1 kB min+gzip](https://img.shields.io/badge/size-11.1%20kB%20min%2Bgzip-informational.svg)
 ![TypeScript](https://img.shields.io/badge/types-TypeScript-3178c6.svg)
 
 A small, framework-agnostic node graph viewer and editor. Define nodes and wires in code with a
@@ -35,7 +35,7 @@ f.connect('hook', 'mail', { label: 'new order' })
 
 ## Features
 
-- **Zero runtime dependencies**, about 10.7 kB minified and gzipped (plus 1.3 kB of CSS).
+- **Zero runtime dependencies**, about 11.1 kB minified and gzipped (plus 1.3 kB of CSS).
 - **Plain DOM and SVG**, so it works with React, Vue, Svelte or no framework at all. Node content
   is any element you hand it.
 - **View and edit modes.** Read-only by default; in edit mode users drag wires between eight
@@ -49,6 +49,8 @@ f.connect('hook', 'mail', { label: 'new order' })
 - **JSON state and diffs** for every user edit, ready to save to `localStorage` or a REST API.
 - **Smooth with 1000+ nodes:** DOM writes are batched into one animation frame, and dragging only
   touches the moved nodes and the wires near them.
+- **Configurable:** turn wheel zoom, panning, selection, editor keys, undo and single edit rights
+  on or off, when mounting or any time later.
 - **Typed wire ends:** in TypeScript, `f.connect('a.x', 'b')` fails to compile with a list of the
   valid anchors.
 
@@ -101,7 +103,8 @@ f.on('change', state => localStorage.setItem('graph', JSON.stringify(state)))
 
 In view mode the graph is read-only: dragging pans, the wheel zooms, a click selects a node. In
 edit mode users can also create, move, reconnect and delete wires and move and delete nodes. Switch
-any time with `f.mode('view' | 'edit')`.
+any time with `f.mode('view' | 'edit')`. [Options](#options) turn single parts of this off, such as
+wheel zoom or deleting.
 
 ### Anchors
 
@@ -271,10 +274,46 @@ Vue: `createApp(Preview).mount(el)`. Svelte 5: `mount(Preview, { target: el })`.
 
 ## API reference
 
-### `flow(root: HTMLElement): Flow`
+### `flow(root: HTMLElement, options?: FlowOptions): Flow`
 
 Mounts a graph inside `root`. The element must have a size; betternodes fills it. Starts in view
-mode.
+mode unless `options.mode` says otherwise.
+
+### Options
+
+Every option is optional, and the defaults match the behaviour described in this README. Pass them
+when mounting, or change them later with `f.set()`; fields you leave out keep their value.
+
+```ts
+// A diagram embedded in a long article: the page keeps scrolling over it.
+const f = flow(el, { zoom: false, pan: false })
+
+// An editor where users may arrange nodes but not rewire or delete anything.
+f.set({ mode: 'edit', connect: false, remove: false })
+```
+
+| Option | Default | What it controls |
+| --- | --- | --- |
+| `mode` | `'view'` | Mode to start in. In `set()` it switches modes like `f.mode()`. |
+| `zoom` | `true` | Zooming with the wheel or a trackpad pinch. When off, wheel events reach the page, so it scrolls past the graph. |
+| `minZoom` | `0.1` | Smallest zoom for the wheel and for fitting. |
+| `maxZoom` | `4` | Largest zoom for the wheel. Fitting never zooms past 100% either way. |
+| `pan` | `true` | Panning by dragging, and scrolling the view while dragging near its edge. |
+| `fit` | `true` | Fitting the whole graph into view on the first render. `f.fit()` works either way. |
+| `select` | `true` | Selecting by click, Shift+click, selection box and Esc. `f.select()` works either way. |
+| `keys` | `true` | Editor keys: Delete, Backspace, Ctrl+Z, Ctrl+Y and Esc. |
+| `history` | `100` | How many edits undo can revert. `0` turns undo and redo off. Lowering it later drops the oldest steps. |
+| `connect` | `true` | Edit mode: drawing new wires and moving wire ends. When off, connection points are hidden. |
+| `move` | `true` | Edit mode: dragging nodes. When off, dragging a node pans, as in view mode. |
+| `remove` | `true` | Edit mode: deleting nodes and wires with Delete or Backspace. |
+| `snap` | `true` | Snapping dragged nodes to the 20px grid. |
+
+Options only limit what users can do. Calls from your code, like `f.connect()`, `f.remove()` or
+`f.undo()`, work whatever they say, except that `history: 0` leaves nothing to undo. Mounting or
+`set()` throws if `minZoom` ends up above `maxZoom`; `set()` then changes nothing.
+
+While any of `connect`, `move` or `remove` is off, the root element carries them in a `data-lock`
+attribute, e.g. `data-lock="connect remove"`, so your own CSS can react to it.
 
 ### Defining nodes: `f.node(id)`
 
@@ -341,10 +380,11 @@ the same, so calling `f.select()` from a listener is safe.
 | Method | Description |
 | --- | --- |
 | `f.mode('view' \| 'edit')` | Switches modes. |
+| `f.set(options)` | Changes [options](#options) while the graph is shown. |
 | `f.state()` | Current `State`. |
 | `f.load(state)` | Restores positions and wires from a saved `State`. `null` is a no-op. Saved wires whose nodes or anchors no longer exist are dropped with a console warning. |
 | `f.on('change', (state, diff) => {}, { signal })` | Called after every user edit, including undo and redo. Never called for changes made in code. The optional `signal` unsubscribes when aborted. |
-| `f.undo()` / `f.redo()` | Reverts or re-applies a user edit and emits `change`. Keeps the last 100 edits. |
+| `f.undo()` / `f.redo()` | Reverts or re-applies a user edit and emits `change`. Keeps the last 100 edits unless the `history` option says otherwise. |
 | `f.layout()` | Re-arranges every node (including positioned ones) into columns that follow the wires, using current node sizes. Takes effect immediately, emits no `change`. |
 | `f.fit()` | Zooms and pans so every node is visible. |
 | `f.destroy()` | Removes everything betternodes added to `root`, including listeners. |
@@ -354,7 +394,8 @@ reverted too.
 
 ### Exported types
 
-`Flow`, `NodeBuilder`, `State`, `Diff`, `Edge`, `Anchor`, `End`, `Selection` and `SendOptions`.
+`Flow`, `NodeBuilder`, `FlowOptions`, `State`, `Diff`, `Edge`, `Anchor`, `End`, `Selection` and
+`SendOptions`.
 
 ## Editor controls
 
@@ -372,7 +413,7 @@ reverted too.
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y (Cmd on macOS). |
 
 Keys only act while the graph has focus (clicking inside it gives focus), and never while typing
-inside your own node content.
+inside your own node content. Each of these controls can be turned off with [options](#options).
 
 ## Persistence
 
@@ -502,6 +543,7 @@ flowchart LR
 src/
   index.ts          public exports
   flow.ts           Flow facade and NodeBuilder: the public API
+  options.ts        FlowOptions, their defaults and merging
   style.css         default look, themed with CSS variables
   model/            graph data, saved state, diffs, undo history
   geometry/         pure math: rects, spatial hash, min-heap, wire routing, lanes, SVG path data

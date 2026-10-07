@@ -1,5 +1,6 @@
 import { Graph, diff, type Anchor, type Diff, type Edge, type NodeDef, type State } from './model/graph'
 import { History } from './model/history'
+import { settle, type FlowOptions, type Settings } from './options'
 import { attach } from './view/interact'
 import { Packets, type SendOptions } from './view/packets'
 import { View } from './view/view'
@@ -52,18 +53,26 @@ export class NodeBuilder {
   }
 }
 
-/** A node graph mounted in a DOM element. Starts in view mode. */
+/** A node graph mounted in a DOM element. Starts in view mode unless the `mode` option says otherwise. */
 export class Flow extends EventTarget {
   private graph = new Graph()
   private view: View
   private detach: () => void
   private packets: Packets
   // Snapshots from before each user edit, and from before each undo.
-  private history = new History<State>()
+  private history: History<State>
+  // Shared with the view and the input handlers, which read it on every event; set() updates it in place.
+  private settings: Settings
 
-  constructor(private root: HTMLElement) {
+  /**
+   * Mounts a graph in `root`; prefer {@link flow}.
+   * @throws if `minZoom` is above `maxZoom`.
+   */
+  constructor(private root: HTMLElement, options: FlowOptions = {}) {
     super()
-    this.view = new View(root, this.graph)
+    this.settings = settle(options)
+    this.history = new History(this.settings.history)
+    this.view = new View(root, this.graph, this.settings)
     this.packets = new Packets(this.view, this.graph)
     this.view.onSelect = () => this.fire('select', this.selection())
     this.detach = attach(this.view, this.graph, {
@@ -71,7 +80,29 @@ export class Flow extends EventTarget {
       undo: () => this.undo(),
       redo: () => this.redo(),
     })
-    this.mode('view')
+    this.mode(options.mode ?? 'view')
+    this.lock()
+  }
+
+  /**
+   * Changes options while the graph is shown; fields left out keep their current value.
+   * @remarks `fit` only matters before the first render; call {@link Flow.fit} to fit later.
+   * Lowering `history` drops the oldest undo steps.
+   * @throws if `minZoom` would end up above `maxZoom`; nothing changes then.
+   */
+  set(options: FlowOptions) {
+    Object.assign(this.settings, settle(options, this.settings))
+    this.history.limit = this.settings.history
+    if (options.mode) this.mode(options.mode)
+    this.lock()
+    return this
+  }
+
+  // Lists the edit rights that are off on the root, so CSS can hide anchors and grab cursors.
+  private lock() {
+    const off = (['connect', 'move', 'remove'] as const).filter(right => !this.settings[right])
+    if (off.length) this.root.dataset.lock = off.join(' ')
+    else delete this.root.dataset.lock
   }
 
   /** Switches between read-only viewing and editing wires and positions. */
@@ -164,7 +195,7 @@ export class Flow extends EventTarget {
   /**
    * Reverts the last user edit and emits `change`.
    * @remarks Restores the state from just before that edit, so code changes made since then are
-   * reverted too. History keeps the last 100 edits.
+   * reverted too. History keeps the last 100 edits unless the `history` option says otherwise.
    */
   undo() {
     return this.travel('undo')
@@ -244,7 +275,10 @@ export class Flow extends EventTarget {
     return this
   }
 
-  /** Zooms (never past 100%) and pans so the whole graph is visible; also runs on first render. */
+  /**
+   * Zooms (never past 100%) and pans so the whole graph is visible; also runs on first render
+   * unless the `fit` option is off.
+   */
   fit() {
     this.view.fit()
     return this
@@ -269,6 +303,7 @@ export class Flow extends EventTarget {
     this.detach()
     this.view.destroy()
     delete this.root.dataset.mode
+    delete this.root.dataset.lock
   }
 
   /** Current positions and wires, ready to persist. */

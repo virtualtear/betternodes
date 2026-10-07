@@ -134,7 +134,13 @@
 
 /* visibility, not display: toggling modes then repaints instead of laying out every anchor. */
 .bn[data-mode='view'] .bn-anchor,
+.bn[data-lock~='connect'] .bn-anchor,
 .bn-far .bn-anchor { visibility: hidden; }
 .bn-node:hover .bn-anchor { opacity: 1; }
 .bn-anchor:hover { background: var(--bn-accent); }
 .bn[data-mode='edit'] .bn-node { cursor: grab; }
+
+/* Edit rights turned off with the `connect` and `move` options: nothing to grab. */
+.bn[data-lock~='connect'] .bn-hit,
+.bn[data-lock~='connect'] .bn-label,
+.bn[data-mode='edit'][data-lock~='move'] .bn-node { cursor: auto; }

@@ -3,6 +3,7 @@ import { GRID, type Point, type Rect } from '../geometry/rect'
 import { route } from '../geometry/route'
 import { curve } from '../geometry/svg-path'
 import { layout } from '../layout/columns'
+import type { Settings } from '../options'
 import { untangle } from '../layout/untangle'
 import { anchorDots, arrowDefs, h, svg, swapClass } from './dom'
 import { Wires } from './wires'
@@ -52,8 +53,8 @@ export class View {
   private queued = false
   private frame = 0
   private panned = false
-  // Starts true so the first render shows the whole graph.
-  private fitting = true
+  // Set in the constructor from the `fit` option, so the first render shows the whole graph.
+  private fitting: boolean
   // Packets ride above the wires but below the nodes, so they slide into a node when they arrive.
   private packets = svg('g')
   /** Runs at the end of every frame, after wires got this frame's geometry. */
@@ -71,7 +72,8 @@ export class View {
   // Whether we made the root focusable, so destroy() knows to undo it.
   private tabbed: boolean
 
-  constructor(readonly root: HTMLElement, readonly graph: Graph) {
+  constructor(readonly root: HTMLElement, readonly graph: Graph, readonly settings: Settings) {
+    this.fitting = settings.fit
     root.classList.add('bn')
     // Focusable, so a click inside it lets Delete/Escape reach its keydown listener.
     this.tabbed = !root.hasAttribute('tabindex')
@@ -143,7 +145,7 @@ export class View {
     this.flush(performance.now())
   }
 
-  /** Zooms (never past 100%) and pans so every node is visible, on the next frame. */
+  /** Zooms (never past 100%, never below `minZoom`) and pans so every node is visible, on the next frame. */
   fit() {
     this.fitting = true
     this.update()
@@ -336,7 +338,8 @@ export class View {
       y1 = Math.max(y1, y + bh)
     }
     const pad = 40
-    const k = Math.min(1, Math.max(0.1, Math.min((w - 2 * pad) / (x1 - x0), (h - 2 * pad) / (y1 - y0))))
+    const { minZoom, maxZoom } = this.settings
+    const k = Math.max(minZoom, Math.min(1, maxZoom, (w - 2 * pad) / (x1 - x0), (h - 2 * pad) / (y1 - y0)))
     Object.assign(this, { x: (w - (x1 - x0) * k) / 2 - x0 * k, y: (h - (y1 - y0) * k) / 2 - y0 * k, k })
     this.fitting = false
     this.applyViewport()

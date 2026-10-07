@@ -78,7 +78,10 @@ export interface Ops {
 
 /** Wires pointer and keyboard input on the view's root to the graph; returns a detach function. */
 export function attach(view: View, graph: Graph, { changed, undo, redo }: Ops) {
-  const { root } = view
+  // Options are read on every event, so Flow.set() takes effect without re-attaching.
+  const { root, settings: s } = view
+  // Gestures only pan near the border when panning is on.
+  const borderPan = () => (s.pan ? view : undefined)
   // Every listener, including those of a gesture in progress, ends when this aborts.
   const life = new AbortController()
   const { signal } = life
@@ -108,15 +111,14 @@ export function attach(view: View, graph: Graph, { changed, undo, redo }: Ops) {
         if (note) graph.label(from, to, note)
       }
       graph.connect(from, to)
-      view.select([], `${from}>${to}`)
+      if (s.select) view.select([], `${from}>${to}`)
       changed(before)
-    }, signal, view)
+    }, signal, borderPan())
   }
 
-  // Moves every selected node by one offset, chosen so `grabbed` snaps to the grid. Offsets come
-  // from world points, so zooming or edge panning mid-drag keeps the nodes under the pointer.
-  const dragNodes = (e: PointerEvent, grabbed: string) => {
-    const group = new Set(view.selected.nodes)
+  // Moves `group` by one offset, chosen so `grabbed` snaps to the grid. Offsets come from world
+  // points, so zooming or edge panning mid-drag keeps the nodes under the pointer.
+  const dragNodes = (e: PointerEvent, grabbed: string, group: Set<string>) => {
     const nodes = [...group].map(id => graph.nodes.get(id)!)
     const starts = nodes.map(n => [n.x, n.y])
     const { x: gx, y: gy } = graph.nodes.get(grabbed)!
@@ -126,7 +128,7 @@ export function attach(view: View, graph: Graph, { changed, undo, redo }: Ops) {
     view.dragging = group
     gesture(e => {
       const [wx, wy] = view.toWorld(e.clientX, e.clientY)
-      const [dx, dy] = [snap(gx + wx - px) - gx, snap(gy + wy - py) - gy]
+      const [dx, dy] = s.snap ? [snap(gx + wx - px) - gx, snap(gy + wy - py) - gy] : [wx - px, wy - py]
       nodes.forEach((n, i) => {
         Object.assign(n, { x: starts[i][0] + dx, y: starts[i][1] + dy, placed: true })
         view.place(n.id)
@@ -141,8 +143,8 @@ export function attach(view: View, graph: Graph, { changed, undo, redo }: Ops) {
       })
       if (nodes.some((n, i) => n.x !== starts[i][0] || n.y !== starts[i][1])) changed(before)
       // A click on one node of a group selects just that node.
-      if (e.type === 'pointerup' && Math.hypot(e.clientX - sx, e.clientY - sy) < SLOP) view.select([grabbed])
-    }, signal, view)
+      if (s.select && e.type === 'pointerup' && Math.hypot(e.clientX - sx, e.clientY - sy) < SLOP) view.select([grabbed])
+    }, signal, borderPan())
   }
 
   // Shift+drag on the background: on release, adds every node the box touches to the selection.
@@ -158,13 +160,13 @@ export function attach(view: View, graph: Graph, { changed, undo, redo }: Ops) {
       if (e.type !== 'pointerup' || !area) return
       const hits = [...graph.nodes.keys()].filter(id => overlap(view.box(id), area))
       view.select([...view.selected.nodes, ...hits])
-    }, signal, view)
+    }, signal, borderPan())
   }
 
-  // Pans by dragging; a press that barely moves is a click and calls `click` instead.
+  // Pans by dragging (if panning is on); a press that barely moves is a click and calls `click` instead.
   const pan = (e: PointerEvent, click: () => void) => {
     const [x0, y0, sx, sy] = [view.x, view.y, e.clientX, e.clientY]
-    gesture(e => view.viewport(x0 + e.clientX - sx, y0 + e.clientY - sy, view.k), e => {
+    gesture(e => s.pan && view.viewport(x0 + e.clientX - sx, y0 + e.clientY - sy, view.k), e => {
       if (e.type === 'pointerup' && Math.hypot(e.clientX - sx, e.clientY - sy) < SLOP) click()
     }, signal)
   }
@@ -188,46 +190,50 @@ export function attach(view: View, graph: Graph, { changed, undo, redo }: Ops) {
     const target = e.target as Element
     const node = target.closest<HTMLElement>('[data-node]')?.dataset.node
     // View mode: every drag pans, a click selects a node or clears the selection.
-    if (root.dataset.mode !== 'edit') return pan(e, () => view.select(node ? [node] : []))
+    if (root.dataset.mode !== 'edit') return pan(e, () => s.select && view.select(node ? [node] : []))
     const wire = target.closest<SVGElement>('[data-wire]')?.dataset.wire
-    const anchor = target.closest<HTMLElement>('[data-anchor]')?.dataset.anchor
+    // Without `connect`, an anchor is just part of its node.
+    const anchor = s.connect && target.closest<HTMLElement>('[data-anchor]')?.dataset.anchor
     if (anchor) {
-      view.select()
+      if (s.select) view.select()
       return dragWire(anchor, dropped => [anchor, dropped])
     }
     if (wire) {
-      view.select([], wire)
-      return grabWire(e, wire)
+      if (s.select) view.select([], wire)
+      return s.connect ? grabWire(e, wire) : pan(e, () => {})
     }
-    if (!node) return e.shiftKey ? marquee(e) : pan(e, () => view.select())
+    if (!node) return e.shiftKey && s.select ? marquee(e) : pan(e, () => s.select && view.select())
     const { nodes } = view.selected
-    if (e.shiftKey) return view.select(nodes.has(node) ? [...nodes].filter(id => id !== node) : [...nodes, node])
+    if (e.shiftKey && s.select) return view.select(nodes.has(node) ? [...nodes].filter(id => id !== node) : [...nodes, node])
     // Pressing an unselected node selects just it; pressing a selected one drags the whole group.
-    if (!nodes.has(node)) view.select([node])
-    dragNodes(e, node)
+    if (s.select && !nodes.has(node)) view.select([node])
+    // Without `move`, dragging a node pans, as in view mode.
+    if (!s.move) return pan(e, () => {})
+    dragNodes(e, node, nodes.has(node) ? new Set(nodes) : new Set([node]))
   }
 
-  // Zooms around the cursor: the world point under it stays put.
+  // Zooms around the cursor: the world point under it stays put. Without `zoom` the page scrolls.
   const wheel = (e: WheelEvent) => {
+    if (!s.zoom) return
     e.preventDefault()
     const r = root.getBoundingClientRect()
     const px = e.clientX - r.left
     const py = e.clientY - r.top
-    const k = Math.min(4, Math.max(0.1, view.k * Math.exp(-e.deltaY / 500)))
-    const s = k / view.k
-    view.viewport(px - (px - view.x) * s, py - (py - view.y) * s, k)
+    const k = Math.min(s.maxZoom, Math.max(s.minZoom, view.k * Math.exp(-e.deltaY / 500)))
+    const ratio = k / view.k
+    view.viewport(px - (px - view.x) * ratio, py - (py - view.y) * ratio, k)
   }
 
   // Only keys aimed at the root itself, never ones typed into inputs inside node content.
   const key = (e: KeyboardEvent) => {
-    if (e.target !== root || root.dataset.mode !== 'edit') return
+    if (!s.keys || e.target !== root || root.dataset.mode !== 'edit') return
     const k = e.key.toLowerCase()
     if ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y')) {
       e.preventDefault()
       return k === 'y' || e.shiftKey ? redo() : undo()
     }
-    if (e.key === 'Escape') return view.select()
-    if (e.key !== 'Delete' && e.key !== 'Backspace') return
+    if (e.key === 'Escape') return s.select && view.select()
+    if (!s.remove || (e.key !== 'Delete' && e.key !== 'Backspace')) return
     const { nodes, wire } = view.selected
     const edge = wire ? graph.edges.get(wire) : undefined
     if (!edge && !nodes.size) return
