@@ -35,7 +35,8 @@ f.connect('hook', 'mail', { label: 'new order' })
 
 ## Features
 
-- **Zero runtime dependencies**, about 13.5 kB minified and gzipped (plus 1.7 kB of CSS).
+- **Zero runtime dependencies**, about 13.5 kB minified and gzipped (plus 2.4 kB of CSS).
+- **Light and dark themes** built from CSS variables, with nodes that lift while you drag them.
 - **Plain DOM and SVG**, so it works with React, Vue, Svelte or no framework at all. Node content
   is any element you hand it.
 - **View and edit modes.** Read-only by default; in edit mode users drag wires between eight
@@ -485,6 +486,11 @@ reverted too.
 
 ## Editor controls
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/editing-dark.png">
+  <img alt="Edit mode: the Webhook node is selected and lifted mid-drag, its wires following it." src="docs/screenshots/editing-light.png">
+</picture>
+
 | Action | How |
 | --- | --- |
 | Pan | Drag the background (in view mode, drag anywhere). The selection stays. |
@@ -527,38 +533,53 @@ f.on('change', (_, diff) => api.patch('/graph', diff))
 
 Override these CSS variables on `.bn` or on your root element:
 
-| Variable | Default | Used for |
+```ts
+el.classList.add('bn-dark')   // always dark
+el.classList.add('bn-auto')   // follows the system setting
+```
+
+Every colour variable holds a `light-dark()` pair, so overriding one with a single colour applies
+to both themes. Override them on `.bn` or on your root element:
+
+| Variable | Default (light / dark) | Used for |
 | --- | --- | --- |
-| `--bn-bg` | `#f6f7f9` | Canvas background |
-| `--bn-grid` | `#dde1e6` | Grid dots |
-| `--bn-node-bg` | `#fff` | Node background |
-| `--bn-node-border` | `#c9ced6` | Node outline |
-| `--bn-text` | `#1f2328` | Text |
-| `--bn-accent` | `#ff6d5a` | Connection points, selected wire, wire being dragged |
-| `--bn-wire` | `#9aa3ae` | Wires |
+| `--bn-bg` | `#fafafa` / `#09090b` | Canvas background, and the halo behind wire notes |
+| `--bn-grid` | `#d4d4d8` / `#27272a` | Grid dots |
+| `--bn-node-bg` | `#fff` / `#18181b` | Node background |
+| `--bn-node-border` | zinc 10% / white 10% | Node outline |
+| `--bn-node-hover` | zinc 20% / white 20% | Node outline on hover and while dragged |
+| `--bn-shadow` | zinc 6% / black 50% | Node and minimap shadows |
+| `--bn-text` | `#18181b` / `#fafafa` | Text |
+| `--bn-text-muted` | `#52525b` / `#a1a1aa` | Wire notes, group titles |
+| `--bn-accent` | `#4f46e5` / `#818cf8` | Selection, connection points on hover, wire being dragged |
+| `--bn-wire` | `#a1a1aa` / `#52525b` | Wires |
+| `--bn-wire-hover` | `#71717a` / `#a1a1aa` | Wires on hover, connection point rings |
 | `--bn-packet` | `--bn-accent` | Packet dots (`.bn-packet`) |
-| `--bn-radius` | `8px` | Node corner radius |
-| `--bn-anchor` | `10px` | Connection point size |
-| `--bn-group-bg` | `#1f232808` | Group frame background |
-| `--bn-group-border` | `#c9ced6` | Group frame outline |
-| `--bn-minimap-bg` | `#fffc` | Minimap background |
-| `--bn-minimap-node` | `#c9ced6` | Nodes in the minimap |
+| `--bn-radius` | `12px` | Node corner radius; frames add 4px |
+| `--bn-anchor` | `9px` | Connection point size |
+| `--bn-group-bg` | zinc 2.5% / white 3% | Group frame background |
+| `--bn-group-border` | zinc 8% / white 8% | Group frame outline |
+| `--bn-minimap-bg` | white 90% / zinc 90% | Minimap background |
+| `--bn-minimap-node` | `#d4d4d8` / `#3f3f46` | Nodes in the minimap |
 | `--bn-minimap-view` | `--bn-accent` | Visible-area box in the minimap |
 
 Nodes are `.bn-node` elements with a `.bn-title`; style them, or the classes you add with
-`.class()`, like any other HTML. Selected nodes and wires get `.bn-selected`, and the selection box
-is a `.bn-band` element. Wire notes are SVG `.bn-label` text with a halo in `--bn-bg`. Each wire is
-a `<g data-wire>` holding a `.bn-wire` path, and gets the classes from `wireClass()`. Group frames are
-`.bn-group` elements with a `.bn-group-title`, plus the classes from `.class()`. The minimap is
-an SVG `.bn-minimap` (place or size it with CSS) whose `.bn-mini-node` rects carry each node's
-classes, so `.bn-mini-node.error` can colour a status. A packet
-sent with `{ class }` gets that class next to `.bn-packet`:
+`.class()`, like any other HTML. Selected nodes and wires get `.bn-selected`, nodes being dragged
+get `.bn-dragging`, and the selection box is a `.bn-band` element. Wire notes are SVG `.bn-label`
+text with a halo in `--bn-bg`. Each wire is a `<g data-wire>` holding a `.bn-wire` path, and gets
+the classes from `wireClass()`. Group frames are `.bn-group` elements with a `.bn-group-title`,
+plus the classes from `.class()`. The minimap is an SVG `.bn-minimap` (place or size it with CSS)
+whose `.bn-mini-node` rects carry each node's classes, so `.bn-mini-node.error` can colour a
+status. A packet sent with `{ class }` gets that class next to `.bn-packet`.
+
+To colour a node's status, set the outline variables rather than `box-shadow`, so hover and drag
+shadows keep working:
 
 ```css
-.bn-node.error { box-shadow: 0 0 0 2px #e5484d; }
-.error .bn-wire { stroke: #e5484d; }
+.bn-node.error { --bn-node-border: #f43f5e80; --bn-node-hover: #f43f5e; }
+.error .bn-wire { stroke: #f43f5e; }
 .bn-label { font-style: italic; }
-.bn-packet.error { fill: #e5484d; }
+.bn-packet.error { fill: #f43f5e; }
 ```
 
 ## Performance
@@ -574,7 +595,7 @@ layout and paint work; they fail below their budget. The browser caps them at th
 | Mount 1000 nodes and 970 wires (first frame) | 124 ms | 500 ms |
 | Frame while dragging a node, 1000 nodes | 0.9 ms | 8 ms |
 | Frame while dragging 100 selected nodes, 1000 nodes | 1.7 ms | 8 ms |
-| Same, with the minimap on (includes a forced layout the benchmark causes, not real frames) | 3.6 ms | 8 ms |
+| Same, with the minimap on (includes a forced layout the benchmark causes, not real frames) | 4.9 ms | 8 ms |
 | Frame while dragging all 1000 nodes | 3.5 ms | 8 ms |
 | Frame while panning, 1000 nodes | < 0.1 ms | 8 ms |
 | Frame with 200 packets in flight, 1000 nodes | 1.3 ms | 8 ms |
@@ -608,7 +629,8 @@ around a second for 1000 nodes.
 
 ## Browser support
 
-Current Chrome, Edge, Firefox and Safari. Arrowheads use `fill: context-stroke`.
+Current Chrome, Edge, Firefox and Safari. The theme uses `light-dark()` and `color-mix()`, and
+arrowheads use `fill: context-stroke`.
 
 ## Architecture
 
@@ -653,6 +675,7 @@ src/
 test/               browser tests, plus compile-time type checks in types.check.ts
 bench/              performance benchmarks with budgets
 index.html          demo page served by `npm run dev`
+docs/screenshots/   README images, taken from the demo page in light and dark
 ```
 
 ### One frame

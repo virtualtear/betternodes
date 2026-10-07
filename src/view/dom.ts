@@ -43,6 +43,6 @@ export function anchorDots(node: string) {
 export function arrowDefs() {
   const defs = svg('defs')
   defs.innerHTML = '<marker id="bn-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse"'
-    + ' markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path class="bn-arrow" d="M0 0L10 5L0 10z"/></marker>'
+    + ' markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="bn-arrow" d="M0 0L10 5L0 10z"/></marker>'
   return defs
 }
