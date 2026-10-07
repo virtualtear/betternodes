@@ -68,6 +68,11 @@ export interface FlowOptions {
    */
   snap?: boolean
   /**
+   * An overview of the whole graph in the bottom-right corner; click or drag in it to pan.
+   * @defaultValue `false`
+   */
+  minimap?: boolean
+  /**
    * Decides whether a wire the user draws or reconnects may exist; return false to reject it.
    * Gets the ends as they would be stored: `'node.anchor'`, or a bare node id for a floating end.
    * Wires from code are never checked.
@@ -92,6 +97,7 @@ const DEFAULTS: Settings = {
   move: true,
   remove: true,
   snap: true,
+  minimap: false,
   canConnect: () => true,
 }
 

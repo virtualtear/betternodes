@@ -107,6 +107,7 @@ export class Flow extends EventTarget {
     this.history.resize(this.settings.history)
     if (options.mode) this.mode(options.mode)
     this.lock()
+    this.view.update() // e.g. to show or hide the minimap
     return this
   }
 

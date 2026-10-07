@@ -53,7 +53,7 @@
 
     const n = Number(new URLSearchParams(location.search).get('n'))
     const key = `betternodes-demo-v4-${n || 'sample'}`
-    const f = flow(document.getElementById('app'))
+    const f = flow(document.getElementById('app'), { minimap: true })
 
     // Event console, newest line on top, capped at 200 lines.
     const log = document.getElementById('log')

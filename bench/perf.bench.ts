@@ -140,20 +140,25 @@ test('frames on a 1000-node graph', async () => {
   // A group drag: a selected 10x10 block of nodes moves together.
   const block = Array.from({ length: 100 }, (_, i) => (10 + Math.floor(i / 10)) * COLS + 10 + (i % 10))
   const ids = block.map(i => `n${i}`)
+  const dragBlock = () => {
+    view(f).dragging = new Set(ids)
+    const dx = (++step % 10) * 20
+    for (const i of block) {
+      Object.assign(graphOf(f).nodes.get(`n${i}`)!, { x: gridAt(i)[0] + dx, y: gridAt(i)[1] + 60 })
+      view(f).place(`n${i}`)
+    }
+    frameNow(f)
+  }
   f.select(...ids)
-  await measure('frame: dragging 100 selected nodes (1000 nodes)', {
-    budget: 8,
-    runs: 60,
-    run: () => {
-      view(f).dragging = new Set(ids)
-      const dx = (++step % 10) * 20
-      for (const i of block) {
-        Object.assign(graphOf(f).nodes.get(`n${i}`)!, { x: gridAt(i)[0] + dx, y: gridAt(i)[1] + 60 })
-        view(f).place(`n${i}`)
-      }
-      frameNow(f)
-    },
-  })
+  await measure('frame: dragging 100 selected nodes (1000 nodes)', { budget: 8, runs: 60, run: dragBlock })
+  // The minimap redraws the moved nodes and re-measures the bounds of all of them. It reads the
+  // root size at frame start, which costs nothing in real frames but a layout here: back-to-back
+  // flushes have no paint in between to clean up the previous frame's writes.
+  f.set({ minimap: true })
+  frameNow(f)
+  await measure('frame: dragging 100 selected nodes, minimap on (1000 nodes)', { budget: 8, runs: 60, run: dragBlock })
+  f.set({ minimap: false })
+  frameNow(f)
   // Everything selected and dragged: wires inside the group move along instead of re-routing.
   const all = Array.from({ length: 1000 }, (_, i) => `n${i}`)
   f.select(...all)

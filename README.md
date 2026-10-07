@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen.svg)
-![Size: 11.9 kB min+gzip](https://img.shields.io/badge/size-11.9%20kB%20min%2Bgzip-informational.svg)
+![Size: 12.6 kB min+gzip](https://img.shields.io/badge/size-12.6%20kB%20min%2Bgzip-informational.svg)
 ![TypeScript](https://img.shields.io/badge/types-TypeScript-3178c6.svg)
 
 A small, framework-agnostic node graph viewer and editor. Define nodes and wires in code with a
@@ -35,7 +35,7 @@ f.connect('hook', 'mail', { label: 'new order' })
 
 ## Features
 
-- **Zero runtime dependencies**, about 11.9 kB minified and gzipped (plus 1.4 kB of CSS).
+- **Zero runtime dependencies**, about 12.6 kB minified and gzipped (plus 1.5 kB of CSS).
 - **Plain DOM and SVG**, so it works with React, Vue, Svelte or no framework at all. Node content
   is any element you hand it.
 - **View and edit modes.** Read-only by default; in edit mode users drag wires between eight
@@ -47,6 +47,7 @@ f.connect('hook', 'mail', { label: 'new order' })
   other, even when their content grows.
 - **Animated packets** that travel along the wires to show data flowing through the graph.
 - **JSON state and diffs** for every user edit, ready to save to `localStorage` or a REST API.
+- **Minimap** for finding your way around big graphs.
 - **Smooth with 1000+ nodes:** DOM writes are batched into one animation frame, and dragging only
   touches the moved nodes and the wires near them.
 - **Hooks for your UI:** click, double-click, context-menu and hover events on nodes and wires, a
@@ -324,6 +325,7 @@ f.set({ mode: 'edit', connect: false, remove: false })
 | `move` | `true` | Edit mode: dragging nodes. When off, dragging a node pans, as in view mode. |
 | `remove` | `true` | Edit mode: deleting nodes and wires with Delete or Backspace. |
 | `snap` | `true` | Snapping dragged nodes to the 20px grid. |
+| `minimap` | `false` | An overview of the whole graph in the bottom-right corner. Click or drag in it to pan (unless `pan` is off). |
 | `canConnect` | allows all | `(from, to) => boolean`, asked before a wire the user draws or reconnects is made. Ends come as stored: `'node.anchor'`, or a bare id for a floating end. Return false to reject it. |
 
 Options only limit what users can do. Calls from your code, like `f.connect()`, `f.remove()` or
@@ -451,6 +453,7 @@ reverted too.
 | Select | Click a node or wire; in view mode only nodes. Esc or a click on empty space deselects. |
 | Select several nodes | Shift+click a node to add or remove it. Shift+drag on the background draws a box; every node it touches is added. |
 | Move nodes | Drag a node. If it is selected, every selected node moves along. Positions snap to the 20px grid. Nodes can pass over each other while you drag. A node stays where you drop it unless that is closer than 10px to another node; then it moves to the nearest spot with room. Clicking one node of a group selects just that node. |
+| Minimap | With the `minimap` option, click or drag in the overview to move the view there. |
 | Scroll while dragging | While dragging a node, a wire end or a selection box, move the pointer near the edge of the graph; the view scrolls that way, faster closer to the edge. |
 | New wire | Hover a node, drag from one of its connection points to another node. Points show at 50% zoom or more. |
 | Move a wire end | Press on a wire near the end you want to move and drag it elsewhere. Dropping on empty space puts it back. |
@@ -496,11 +499,16 @@ Override these CSS variables on `.bn` or on your root element:
 | `--bn-packet` | `--bn-accent` | Packet dots (`.bn-packet`) |
 | `--bn-radius` | `8px` | Node corner radius |
 | `--bn-anchor` | `10px` | Connection point size |
+| `--bn-minimap-bg` | `#fffc` | Minimap background |
+| `--bn-minimap-node` | `#c9ced6` | Nodes in the minimap |
+| `--bn-minimap-view` | `--bn-accent` | Visible-area box in the minimap |
 
 Nodes are `.bn-node` elements with a `.bn-title`; style them, or the classes you add with
 `.class()`, like any other HTML. Selected nodes and wires get `.bn-selected`, and the selection box
 is a `.bn-band` element. Wire notes are SVG `.bn-label` text with a halo in `--bn-bg`. Each wire is
-a `<g data-wire>` holding a `.bn-wire` path, and gets the classes from `wireClass()`. A packet
+a `<g data-wire>` holding a `.bn-wire` path, and gets the classes from `wireClass()`. The minimap is
+an SVG `.bn-minimap` (place or size it with CSS) whose `.bn-mini-node` rects carry each node's
+classes, so `.bn-mini-node.error` can colour a status. A packet
 sent with `{ class }` gets that class next to `.bn-packet`:
 
 ```css
@@ -523,6 +531,7 @@ layout and paint work; they fail below their budget. The browser caps them at th
 | Mount 1000 nodes and 970 wires (first frame) | 124 ms | 500 ms |
 | Frame while dragging a node, 1000 nodes | 0.9 ms | 8 ms |
 | Frame while dragging 100 selected nodes, 1000 nodes | 1.7 ms | 8 ms |
+| Same, with the minimap on (includes a forced layout the benchmark causes, not real frames) | 3.6 ms | 8 ms |
 | Frame while dragging all 1000 nodes | 3.5 ms | 8 ms |
 | Frame while panning, 1000 nodes | < 0.1 ms | 8 ms |
 | Frame with 200 packets in flight, 1000 nodes | 1.3 ms | 8 ms |

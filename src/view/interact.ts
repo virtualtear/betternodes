@@ -214,8 +214,23 @@ export function attach(view: View, graph: Graph, { changed, undo, redo, pointer,
     else dragWire(to, dropped => [dropped, to], wire)
   }
 
+  // Centres the view on the world point under the pointer in the minimap, following it until
+  // released; the minimap keeps its scale meanwhile.
+  const steer = (e: PointerEvent) => {
+    const mini = view.mini!
+    const follow = (e: PointerEvent) => {
+      const [x, y] = mini.toWorld(e.clientX, e.clientY)
+      view.viewport(root.clientWidth / 2 - x * view.k, root.clientHeight / 2 - y * view.k, view.k)
+    }
+    mini.hold(true)
+    follow(e)
+    gesture(follow, () => mini.hold(false), signal)
+  }
+
   const down = (e: PointerEvent) => {
     if (e.button !== 0) return
+    // The minimap only navigates: no clicks, no selection.
+    if (view.mini?.el.contains(e.target as Node)) return s.pan && steer(e)
     press(e)
     // Registered after the press's own gesture, so a click sees the selection it made.
     const hit = hitAt(e.target as Element)

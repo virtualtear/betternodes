@@ -6,6 +6,7 @@ import { layout } from '../layout/columns'
 import type { Settings } from '../options'
 import { untangle } from '../layout/untangle'
 import { anchorDots, arrowDefs, h, svg, swapClass } from './dom'
+import { Minimap } from './minimap'
 import { Wires } from './wires'
 
 /** Unit vector pointing outward from a ref's anchor, e.g. `[1, 0]` for `e`. */
@@ -31,6 +32,9 @@ export class View {
   y = 0
   /** Zoom factor: screen px per world px. */
   k = 1
+  /** Root size in screen px, as of the last frame that fitted or drew the minimap. */
+  width = 0
+  height = 0
   /** Nodes being dragged right now; they may overlap others until they are dropped. */
   dragging = new Set<string>()
   /** Selected nodes, or one selected wire by `from>to` key; never both. Change it with {@link View.select}. */
@@ -63,6 +67,8 @@ export class View {
   onFrame?: (now: number) => void
   /** Runs once per frame in which the pan offset or zoom changed. */
   onViewport?: () => void
+  /** Present while the `minimap` option is on; created and removed by the next frame. */
+  mini?: Minimap
   private ghost?: { fixed: string; to: Point; hide?: string }
   private lifted: Element[] = []
   private highlighted: Element[] = []
@@ -91,6 +97,7 @@ export class View {
 
   /** Removes everything this view added to the root. */
   destroy() {
+    this.mini?.destroy()
     this.resize.disconnect()
     this.world.remove()
     this.band.remove()
@@ -112,6 +119,7 @@ export class View {
       this.resize.unobserve(el)
       el.remove()
     }
+    this.mini?.drop(id)
     for (const map of [this.els, this.sizes]) map.delete(id)
     for (const set of [this.dirty, this.moved, this.stale]) set.delete(id)
     if (this.selected.nodes.has(id)) this.select([...this.selected.nodes].filter(other => other !== id))
@@ -259,6 +267,8 @@ export class View {
   // the steps after measuring only write transforms, which need no new layout.
   private flush(now: number) {
     this.queued = false
+    // Read before this frame's writes, which a read would otherwise have to lay out first.
+    if (this.fitting || this.settings.minimap) Object.assign(this, { width: this.root.clientWidth, height: this.root.clientHeight })
     if (this.panned) this.applyViewport()
     for (const id of this.dirty) this.renderNode(this.graph.nodes.get(id)!)
     for (const id of this.moved) {
@@ -270,6 +280,8 @@ export class View {
     this.autoLayout()
     this.pullApart()
     const fitted = this.fitting && this.fitAll()
+    this.toggleMinimap()
+    this.mini?.render(this.moved, this.panned || fitted)
     this.wires.render(this.moved, this.dragging)
     this.renderOverlays()
     this.dirty.clear()
@@ -303,6 +315,15 @@ export class View {
     const rects = new Map(ids.map(id => [id, this.box(id)]))
     for (const [id, [x, y]] of untangle(ids, rects, this.moved, GRID, GRID, this.dragging)) {
       this.move(this.graph.nodes.get(id)!, x, y)
+    }
+  }
+
+  // Follows the `minimap` option, which Flow.set() may have changed since the last frame.
+  private toggleMinimap() {
+    if (this.settings.minimap && !this.mini) this.mini = new Minimap(this)
+    else if (!this.settings.minimap && this.mini) {
+      this.mini.destroy()
+      this.mini = undefined
     }
   }
 
@@ -345,7 +366,7 @@ export class View {
   // Runs inside flush, after measuring, and applies the viewport right away so nothing flashes.
   // Returns whether it did; it stays pending while there is nothing to fit.
   private fitAll() {
-    const { clientWidth: w, clientHeight: h } = this.root
+    const { width: w, height: h } = this
     const ids = (this.fitIds ?? [...this.graph.nodes.keys()]).filter(id => this.graph.nodes.has(id))
     // Fitting nodes that got deleted meanwhile is dropped, not kept for when undo brings them back.
     if (this.fitIds && !ids.length) this.fitting = false

@@ -9,6 +9,9 @@
   --bn-packet: var(--bn-accent);
   --bn-radius: 8px;
   --bn-anchor: 10px;
+  --bn-minimap-bg: #fffc;
+  --bn-minimap-node: #c9ced6;
+  --bn-minimap-view: var(--bn-accent);
 
   position: relative;
   overflow: hidden;
@@ -143,3 +146,25 @@
 .bn[data-lock~='connect'] .bn-hit,
 .bn[data-lock~='connect'] .bn-label,
 .bn[data-mode='edit'][data-lock~='move'] .bn-node { cursor: auto; }
+
+/* Overview in the corner; nodes keep their status classes, e.g. .bn-mini-node.error. */
+.bn-minimap {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 200px;
+  height: 150px;
+  background: var(--bn-minimap-bg);
+  border-radius: var(--bn-radius);
+  box-shadow: 0 0 0 1px var(--bn-node-border), 0 1px 3px #0001;
+  cursor: pointer;
+}
+
+.bn-mini-node { fill: var(--bn-minimap-node); }
+
+.bn-mini-view {
+  fill: color-mix(in srgb, var(--bn-minimap-view) 10%, transparent);
+  stroke: var(--bn-minimap-view);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
