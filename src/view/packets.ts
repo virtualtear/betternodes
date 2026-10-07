@@ -1,4 +1,5 @@
 import { nodeOf, type Graph } from '../model/graph'
+import type { Dot } from './dots'
 import type { View } from './view'
 
 /** Options for {@link Flow.send}. */
@@ -31,7 +32,7 @@ interface Packet {
   from: string
   // Progress along the wire's current path, 0..1, so re-routed wires carry the packet along.
   t: number
-  dot: SVGCircleElement
+  dot: Dot
 }
 
 /** Packets travelling along wires; advanced once per animation frame while any are in flight. */
@@ -58,7 +59,7 @@ export class Packets {
   /** Removes every packet and settles their sends with what arrived so far. */
   clear() {
     for (const p of this.live) {
-      p.dot.remove()
+      this.view.dots.remove(p.dot)
       this.live.delete(p)
       this.finish(p.send)
     }
@@ -89,7 +90,7 @@ export class Packets {
 
   private launch(send: Send, wire: string) {
     if (!this.live.size) this.last = performance.now() // first packet after idle: no stale frame delta
-    const dot = this.view.packetDot(send.opts.class)
+    const dot = this.view.dots.add(send.opts.class)
     this.live.add({ send, wire, from: nodeOf(this.graph.edges.get(wire)![0]), t: 0, dot })
     send.live++
     this.view.update()
@@ -103,10 +104,7 @@ export class Packets {
     const [live, arrived] = [send.live, send.arrived.length]
     if (node !== undefined) this.depart(send, node, replan)
     const stuck = send.live === live && send.arrived.length === arrived
-    if (stuck && (replan || send.to !== undefined)) {
-      p.dot.classList.add('bn-drop')
-      setTimeout(() => p.dot.remove(), 200)
-    } else p.dot.remove()
+    this.view.dots.remove(p.dot, stuck && (replan || send.to !== undefined))
     this.finish(send)
   }
 
@@ -148,9 +146,7 @@ export class Packets {
   private step(now: number) {
     const dt = Math.min(100, now - this.last) / 1000 // cap: a background tab must not teleport packets
     this.last = now
-    // Read every position first and write afterwards: interleaving geometry reads with DOM writes
-    // would make the browser recalculate styles once per packet.
-    const moves: [SVGCircleElement, number, number][] = []
+    // Packets that reached a node carry on after the loop, so new hops don't join this step.
     const ends: [Packet, string | undefined, boolean][] = []
     for (const p of this.live) {
       const edge = this.graph.edges.get(p.wire)
@@ -159,20 +155,14 @@ export class Packets {
         ends.push([p, this.graph.nodes.has(p.from) ? p.from : undefined, true])
         continue
       }
-      const path = this.view.path(p.wire)
-      if (!path) continue // wire not drawn yet
-      const length = path.getTotalLength()
+      const track = this.view.track(p.wire)
+      if (!track) continue // wire not drawn yet
+      const { length } = track
       p.t += length ? ((p.send.opts.speed ?? 240) * dt) / length : 1
       if (p.t >= 1) ends.push([p, nodeOf(edge[1]), false])
       else {
-        const { x, y } = path.getPointAtLength(p.t * length)
-        moves.push([p.dot, x, y])
+        this.view.dots.move(p.dot, ...track.at(p.t * length))
       }
-    }
-    for (const [dot, x, y] of moves) {
-      dot.setAttribute('cx', `${x}`)
-      dot.setAttribute('cy', `${y}`)
-      dot.removeAttribute('visibility')
     }
     for (const [p, node, replan] of ends) this.moveOn(p, node, replan)
     if (this.live.size) this.view.update()

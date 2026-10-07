@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen.svg)
-![Size: 13.5 kB min+gzip](https://img.shields.io/badge/size-13.5%20kB%20min%2Bgzip-informational.svg)
+![Size: 13.5 kB min+gzip](https://img.shields.io/badge/size-16.9%20kB%20min%2Bgzip-informational.svg)
 ![TypeScript](https://img.shields.io/badge/types-TypeScript-3178c6.svg)
 
 A small, framework-agnostic node graph viewer and editor. Define nodes and wires in code with a
@@ -40,7 +40,7 @@ f.connect('hook', 'mail', { label: 'new order' })
 
 ## Features
 
-- **Zero runtime dependencies**, about 13.5 kB minified and gzipped (plus 2.4 kB of CSS).
+- **Zero runtime dependencies**, about 16.9 kB minified and gzipped (plus 2.4 kB of CSS).
 - **Light and dark themes** built from CSS variables, with nodes that lift while you drag them.
 - **Plain DOM and SVG**, so it works with React, Vue, Svelte or no framework at all. Node content
   is any element you hand it.
@@ -51,7 +51,8 @@ f.connect('hook', 'mail', { label: 'new order' })
   they share a corridor, and carry optional plain-text notes.
 - **Automatic layout** in columns that follow the wires, and nodes that never stay on top of each
   other, even when their content grows.
-- **Animated packets** that travel along the wires to show data flowing through the graph.
+- **Animated packets** that travel along the wires to show data flowing through the graph, drawn
+  with WebGL so thousands at once stay smooth.
 - **JSON state and diffs** for every user edit, ready to save to `localStorage` or a REST API.
 - **Groups:** titled frames around related nodes that drag as one, kept clear of other nodes.
 - **Minimap** for finding your way around big graphs.
@@ -247,6 +248,12 @@ f.send('if', 'log', { class: 'error', speed: 400 })  // CSS class on the dot, sp
 Packets keep up with edits while they travel: they stay on their wire when nodes are dragged and
 the wire re-routes, and when their wire is deleted or moved, or a node is removed, they go back to
 the node they last left and continue along another route. If no route is left, they fade out.
+
+Packets are drawn with WebGL2 on one canvas between the wires and the nodes, so even thousands at
+once leave the frame time to the rest of the page. They still take their look from CSS (see
+[Theming](#theming)). The WebGL context exists only while packets move and is handed back two
+seconds after the last one, since browsers allow only about 16 per page. Without WebGL2, packets
+are SVG circles instead.
 
 ### Custom content
 
@@ -578,6 +585,11 @@ plus the classes from `.class()`. The minimap is an SVG `.bn-minimap` (place or 
 whose `.bn-mini-node` rects carry each node's classes, so `.bn-mini-node.error` can colour a
 status. A packet sent with `{ class }` gets that class next to `.bn-packet`.
 
+Packets are drawn with WebGL, from the computed style of `.bn-packet` plus their class: `fill`,
+`stroke`, `stroke-width` and `r` apply, in any CSS colour syntax, and changes reach packets already
+in flight. Other properties, such as `opacity`, filters or animations, don't. Where WebGL2 is
+missing, packets are real SVG `.bn-packet` circles and all of CSS applies.
+
 To colour a node's status, set the outline variables rather than `box-shadow`, so hover and drag
 shadows keep working:
 
@@ -604,7 +616,8 @@ layout and paint work; they fail below their budget. The browser caps them at th
 | Same, with the minimap on (includes a forced layout the benchmark causes, not real frames) | 4.9 ms | 8 ms |
 | Frame while dragging all 1000 nodes | 3.5 ms | 8 ms |
 | Frame while panning, 1000 nodes | < 0.1 ms | 8 ms |
-| Frame with 200 packets in flight, 1000 nodes | 1.3 ms | 8 ms |
+| Frame with 200 packets in flight, 1000 nodes | 0.1 ms | 8 ms |
+| Frame with 1000 packets on bent wires | 0.4 ms | 8 ms |
 | Route 1000 short wires | 11 ms | 50 ms |
 | Route 300 long random wires among 200 nodes (worst case) | 163 ms | 600 ms |
 | Spread 1000 wires into lanes | 0.3 ms | 5 ms |
@@ -614,6 +627,7 @@ layout and paint work; they fail below their budget. The browser caps them at th
 | Frame rate while dragging a node, 1000 nodes | 60 fps | 30 fps |
 | Frame rate while panning, 1000 nodes | 60 fps | 30 fps |
 | Frame rate with 200 packets in flight, 1000 nodes | 60 fps | 30 fps |
+| Frame rate with 2000 packets on bent wires (SVG circles: about 15 fps) | 60 fps | 30 fps |
 
 Why it stays fast:
 
@@ -626,7 +640,12 @@ Why it stays fast:
   a route search, capped per wire so one wire never stalls a frame. The search estimates both the
   distance and the bends still needed, so it rarely runs out before finding a way around.
 - Frames where no node moved and no wire changed (panning, packets) skip wire work entirely.
-- Packets advance in one pass per frame and plan their next hop from a cached wire index.
+- Packets advance in one pass per frame and plan their next hop from a cached wire index. Their
+  positions come from a per-wire track computed in JS, not from the browser's SVG geometry calls,
+  which re-walk the path on every call.
+- Packets are WebGL point sprites, all drawn with one buffer upload and one draw call per frame,
+  with no DOM element each. On a desktop GPU the demo keeps frames under 7 ms with about 25,000
+  packets in flight.
 - Nothing runs while the graph is idle.
 
 Known costs: graphs with many long wires crossing a crowded area take noticeably longer on first
@@ -636,7 +655,7 @@ around a second for 1000 nodes.
 ## Browser support
 
 Current Chrome, Edge, Firefox and Safari. The theme uses `light-dark()` and `color-mix()`, and
-arrowheads use `fill: context-stroke`.
+arrowheads use `fill: context-stroke`. Packets use WebGL2 and fall back to SVG without it.
 
 ## Architecture
 
@@ -645,7 +664,7 @@ arrowheads use `fill: context-stroke`.
 | Part | Tool |
 | --- | --- |
 | Language | TypeScript 7, strict mode, ES2023 target |
-| Runtime | Plain DOM and SVG, no dependencies |
+| Runtime | Plain DOM and SVG, WebGL2 for packets, no dependencies |
 | Build | Vite 8 in library mode (one ES module), `tsc` for declarations |
 | Tests | Vitest 5 browser mode in headless Chromium via Playwright |
 | Benchmarks | Vitest in the same browser, with a time budget per scenario |
@@ -678,6 +697,7 @@ src/
   geometry/         pure math: rects, spatial hash, min-heap, wire routing, lanes, SVG path data
   layout/           pure node placement: auto-layout columns, pulling overlaps apart
   view/             DOM: frame scheduler and nodes, wires, group frames, minimap, input, packets
+                    (moved in JS, drawn with WebGL)
 test/               browser tests, plus compile-time type checks in types.check.ts
 bench/              performance benchmarks with budgets
 index.html          demo page served by `npm run dev`
@@ -695,7 +715,8 @@ fixed order, so the browser lays the page out once:
    the view on the first render.
 4. **Wires:** re-route only the wires touched by moved or resized nodes, spread shared corridors
    into lanes, and draw notes.
-5. **Overlays:** wire preview, selection box and selection highlight, then packets advance.
+5. **Overlays:** wire preview, selection box and selection highlight, then packets advance and
+   are drawn.
 
 ## Development
 
@@ -718,9 +739,9 @@ npx playwright install chromium   # once, for tests and benchmarks
 
 The demo page shows most features in one place: a sample flow with wire notes and status classes,
 an "Image service" node whose photo swaps on click, buttons for edit mode, undo, redo, packets,
-layout and fit, and an event console that logs every `select`, `change` and arrived packet. Add
-`?n=1000` to the URL for a stress test with a live fps display. The demo saves its state to
-`localStorage`; "Reset saved state" clears it.
+layout and fit, and an event console that logs every `select`, `change` and arrived packet. Burst
+sends any number of packets at once, to check the frame rate holds. Add `?n=1000` to the URL for a
+stress test with a live fps display. The demo saves its state to `localStorage`; Reset clears it.
 
 ### Testing
 

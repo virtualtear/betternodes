@@ -6,6 +6,7 @@ import { layout } from '../layout/columns'
 import type { Settings } from '../options'
 import { untangle } from '../layout/untangle'
 import { anchorDots, arrowDefs, h, svg, swapClass } from './dom'
+import { Dots } from './dots'
 import { Minimap } from './minimap'
 import { Wires } from './wires'
 
@@ -32,7 +33,7 @@ export class View {
   y = 0
   /** Zoom factor: screen px per world px. */
   k = 1
-  /** Root size in screen px, as of the last frame that fitted or drew the minimap. */
+  /** Root size in screen px, as of the last frame that fitted, drew the minimap or drew packets. */
   width = 0
   height = 0
   /** Nodes being dragged right now; they may overlap others until they are dropped. */
@@ -63,6 +64,8 @@ export class View {
   private fitIds?: string[]
   // Packets ride above the wires but below the nodes, so they slide into a node when they arrive.
   private packets = svg('g')
+  /** Packet dots, drawn at the end of every frame. */
+  readonly dots = new Dots(this.packets, this.svg)
   /** Runs at the end of every frame, after wires got this frame's geometry. */
   onFrame?: (now: number) => void
   /** Runs once per frame in which the pan offset or zoom changed. */
@@ -100,6 +103,7 @@ export class View {
 
   /** Removes everything this view added to the root. */
   destroy() {
+    this.dots.destroy()
     this.mini?.destroy()
     this.resize.disconnect()
     this.world.remove()
@@ -224,20 +228,9 @@ export class View {
     this.update()
   }
 
-  /** The visible path of a wire, once it has been drawn. */
-  path(key: string) {
-    return this.wires.path(key)
-  }
-
-  /** Creates a packet dot in the packet layer, hidden until it is first placed on its wire. */
-  packetDot(className?: string) {
-    const dot = svg('circle', 'bn-packet')
-    if (className) dot.classList.add(className)
-    dot.setAttribute('r', '5')
-    // Without a position it would flash at the world origin for a frame.
-    dot.setAttribute('visibility', 'hidden')
-    this.packets.append(dot)
-    return dot
+  /** The track of a wire's visible path, once it has been drawn. */
+  track(key: string) {
+    return this.wires.track(key)
   }
 
   /** Converts a client (screen) point to world coordinates. */
@@ -285,7 +278,7 @@ export class View {
   private flush(now: number) {
     this.queued = false
     // Read before this frame's writes, which a read would otherwise have to lay out first.
-    if (this.fitting || this.settings.minimap) Object.assign(this, { width: this.root.clientWidth, height: this.root.clientHeight })
+    if (this.fitting || this.settings.minimap || this.dots.size) Object.assign(this, { width: this.root.clientWidth, height: this.root.clientHeight })
     if (this.panned) this.applyViewport()
     for (const id of this.dirty) this.renderNode(this.graph.nodes.get(id)!)
     for (const id of this.moved) {
@@ -308,6 +301,7 @@ export class View {
     if (this.panned || fitted) this.onViewport?.()
     this.panned = false
     this.onFrame?.(now)
+    if (this.dots.draw(now, this.x, this.y, this.k, this.width, this.height)) this.update()
   }
 
   private move(n: NodeDef, x: number, y: number) {

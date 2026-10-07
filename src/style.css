@@ -83,6 +83,13 @@
   transform-box: fill-box;
   transform-origin: center;
 }
+/* WebGL packet layer: covers the visible area between wires and nodes, and never takes the pointer. */
+.bn-packets {
+  position: absolute;
+  inset: 0 auto auto 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
 .bn-drop { animation: bn-drop 200ms ease-out forwards; }
 @keyframes bn-drop { to { opacity: 0; scale: 0.4; } }
 .bn-lifted { display: none; }

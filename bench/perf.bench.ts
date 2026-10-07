@@ -216,9 +216,55 @@ test('frame rate on a 1000-node graph', async () => {
   })
   pointer('pointerup', { x: 500, y: 300 })
   expect(view(f).x, 'the drag panned the view').not.toBe(panned)
-  for (let i = 0; i < 200; i++) void f.send(`n${i * 5}`, `n${i * 5 + 3}`, { speed: 20 })
+  let arrived = 0
+  for (let i = 0; i < 200; i++) void f.send(`n${i * 5}`, `n${i * 5 + 3}`, { speed: 20 }).then(() => arrived++)
   await fps('fps: 200 packets in flight (1000 nodes)', { minFps: 30 })
-  expect(el.querySelectorAll('.bn-packet').length, 'packets were still in flight').toBeGreaterThan(100)
+  expect(arrived, 'packets were still in flight').toBeLessThan(100)
+  f.destroy()
+  el.remove()
+})
+
+// Ten wires with two bends each, between nodes in two columns.
+function bentWires() {
+  const el = document.createElement('div')
+  el.style.cssText = 'position:fixed;left:0;top:0;width:1000px;height:600px'
+  document.body.append(el)
+  const f = flow(el)
+  for (let i = 0; i < 10; i++) {
+    f.node(`l${i}`).title(`Left ${i}`).at(0, i * 80)
+    f.node(`r${i}`).title(`Right ${i}`).at(600, i * 80 + 40)
+    f.connect(`l${i}.e`, `r${i}.w`)
+  }
+  return { el, f }
+}
+
+// Slow and staggered, so they spread along the wires and stay in flight for the whole benchmark.
+function sendSlowly(f: Flow, n: number) {
+  let arrived = 0
+  for (let i = 0; i < n; i++) void f.send(`l${i % 10}`, `r${i % 10}`, { speed: 5 + (i % 50) }).then(() => arrived++)
+  return () => arrived
+}
+
+// Packets on bent wires: each frame places every packet along its wire's curves and corners.
+test('frame with 1000 packets on bent wires', async () => {
+  const { el, f } = bentWires()
+  frameNow(f)
+  const arrived = sendSlowly(f, 1000)
+  frameNow(f)
+  await measure('frame: 1000 packets on bent wires', { budget: 8, runs: 60, run: () => frameNow(f) })
+  expect(arrived(), 'packets were still in flight').toBe(0)
+  f.destroy()
+  el.remove()
+})
+
+// Real frames, so the browser's own work to show the packets counts too. Headless Chromium draws
+// WebGL in software: there SVG circles manage about 15 fps here, the WebGL layer about 60.
+test('frame rate with 2000 packets on bent wires', async () => {
+  const { el, f } = bentWires()
+  await fps('fps: idle (bent wires)', { frames: 10 })
+  const arrived = sendSlowly(f, 2000)
+  await fps('fps: 2000 packets on bent wires', { minFps: 30 })
+  expect(arrived(), 'packets were still in flight').toBe(0)
   f.destroy()
   el.remove()
 })

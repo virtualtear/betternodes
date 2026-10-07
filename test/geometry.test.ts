@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest'
 import { flow } from '../src/index'
+import { rounded, Track } from '../src/geometry/svg-path'
 import { center, container, drag, frame, pointer, wirePoint } from './util'
 
 type Point = { x: number; y: number }
@@ -230,4 +231,22 @@ test('wires inside a dragged group keep their shape until the drop, then route a
   pointer('pointerup', { x, y: y + 260 })
   await frame()
   expect(crosses(el, 'a.e>c.w', 'b'), 're-routed on drop').toBe(false)
+})
+
+test('a track walks the rounded path a wire draws, as the browser measures it', () => {
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  for (const points of [
+    [[0, 0], [100, 0]],
+    [[160, 19.5], [580, 19.5], [580, 219.5], [600, 219.5]],
+    [[0, 0], [0, 6], [40, 6], [40, -90], [-30, -90]],
+  ] as [number, number][][]) {
+    path.setAttribute('d', rounded(points))
+    const track = new Track(points)
+    expect(track.length).toBeCloseTo(path.getTotalLength(), 1)
+    for (let i = 0; i <= 50; i++) {
+      const { x, y } = path.getPointAtLength((i / 50) * path.getTotalLength())
+      const [tx, ty] = track.at((i / 50) * track.length)
+      expect(Math.hypot(tx - x, ty - y)).toBeLessThan(0.1)
+    }
+  }
 })

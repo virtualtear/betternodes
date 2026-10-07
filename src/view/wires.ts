@@ -3,7 +3,7 @@ import { Buckets } from '../geometry/buckets'
 import { separate } from '../geometry/lanes'
 import { bounds, halfway, overlap, type Point, type Rect } from '../geometry/rect'
 import { CLEAR } from '../geometry/route'
-import { rounded } from '../geometry/svg-path'
+import { rounded, Track } from '../geometry/svg-path'
 import { svg } from './dom'
 
 // `r` with `m` px added on every side.
@@ -38,6 +38,8 @@ export class Wires {
   // Routed waypoints per wire, before and after lane separation.
   private routes = new Map<string, Point[]>()
   private drawn = new Map<string, Point[]>()
+  // Tracks of drawn wires, built when a packet first needs one and dropped on every re-route.
+  private tracks = new Map<string, Track>()
   // The <text data-wire> of every wire that shows a note.
   private notes = new Map<string, SVGTextElement>()
   // Classes from Graph.classes as last applied to each wire's elements.
@@ -63,9 +65,12 @@ export class Wires {
     return [this.groups.get(key), this.notes.get(key)].filter(el => el !== undefined)
   }
 
-  /** The visible path of a wire, once it has been drawn. */
-  path(key: string) {
-    return this.groups.get(key)?.firstElementChild as SVGPathElement | undefined
+  /** The track of a wire's visible path, once it has been drawn. */
+  track(key: string) {
+    let track = this.tracks.get(key)
+    const points = this.drawn.get(key)
+    if (!track && points) this.tracks.set(key, (track = new Track(points)))
+    return track
   }
 
   /** Remembers where a removed node was, so wires that went around it get re-routed. */
@@ -144,6 +149,7 @@ export class Wires {
     if (rerouted) {
       // Lanes depend on every wire in a corridor, so re-spread all and write only paths that changed.
       this.drawn = separate(this.routes)
+      this.tracks.clear()
       for (const [key, points] of this.drawn) {
         const d = rounded(points)
         const g = this.groups.get(key)!

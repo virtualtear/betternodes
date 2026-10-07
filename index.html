@@ -42,6 +42,12 @@
     button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     button[aria-pressed='true'] { background: var(--button); box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgb(24 24 27 / 0.08); }
     #run[aria-pressed='true'] { color: var(--accent); }
+    input[type='number'] {
+      width: 7ch; margin: 0; padding: 4px 6px; border: 0; border-radius: 8px;
+      font: inherit; font-variant-numeric: tabular-nums; color: var(--text);
+      background: var(--button); box-shadow: inset 0 0 0 1px var(--line);
+    }
+    input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     .hint { flex: 1 1 320px; margin: 0; color: var(--muted); font-size: 12px; }
     .hint code { white-space: nowrap; }
     /* Touch screens: the keyboard hints don't apply, and the graph needs the room. */
@@ -93,6 +99,10 @@
       <button id="send">Send</button>
       <button id="run" aria-pressed="false">Run</button>
     </div>
+    <form class="tools" id="burst" title="Floods the graph from its first node this many times at once, at mixed speeds">
+      <input id="burst-count" type="number" min="1" max="100000" value="1000" aria-label="Packets per burst">
+      <button>Burst</button>
+    </form>
     <div class="tools">
       <button id="layout">Layout</button>
       <button id="fit">Fit</button>
@@ -232,6 +242,17 @@
       } else timer = setInterval(() => f.send(first), 1000)
       e.target.setAttribute('aria-pressed', String(!!timer))
       e.target.textContent = timer ? 'Stop' : 'Run'
+    }
+    // Burst: many sends in one task, to check the frame rate holds while they travel.
+    document.getElementById('burst').onsubmit = e => {
+      e.preventDefault()
+      const count = document.getElementById('burst-count').valueAsNumber
+      if (!(count >= 1)) return
+      const start = performance.now()
+      // Mixed speeds spread the packets along the wires; at one speed they would overlap as one dot.
+      const sends = Array.from({ length: count }, () => f.send(first, undefined, { speed: 120 + Math.random() * 360 }))
+      write('send', `burst of ${count} started in ${Math.round(performance.now() - start)} ms`)
+      Promise.all(sends).then(() => write('send', `burst of ${count} arrived after ${((performance.now() - start) / 1000).toFixed(1)} s`))
     }
     document.getElementById('undo').onclick = () => f.undo()
     document.getElementById('redo').onclick = () => f.redo()
