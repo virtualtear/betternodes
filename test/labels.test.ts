@@ -1,8 +1,9 @@
 import { expect, test } from 'vitest'
 import { flow } from '../src/index'
+import { notePoint } from '../src/view/wires'
 import { center, click, container, drag, frame, press, wirePoint } from './util'
 
-/** A at 20,20 and B at 320,140, wired `a.e` -> `b.w` with a note, mounted and rendered. */
+/** A at 20,20 and B at 320,140, with a noted wire from `a.e` to `b.w`, mounted and rendered. */
 async function setup(label = 'yes') {
   const el = container()
   const f = flow(el).mode('edit')
@@ -131,4 +132,13 @@ test('bn-two-way and bn-no-arrow change the arrowheads', async () => {
   expect(getComputedStyle(path).markerStart).toContain('bn-arrow')
   el.classList.add('bn-no-arrow') // on the root it covers every wire
   expect([getComputedStyle(path).markerStart, getComputedStyle(path).markerEnd]).toEqual(['none', 'none'])
+})
+
+test('a note takes the longest inner stretch of its wire where it covers no node', () => {
+  const points: [number, number][] = [[0, 0], [0, 20], [100, 20], [100, 300], [200, 300], [200, 320]]
+  expect(notePoint(points, () => true)).toEqual([100, 160])
+  // The longest is taken: the next longest goes, the first of equals winning.
+  expect(notePoint(points, ([x, y]) => x !== 100 || y !== 160)).toEqual([50, 20])
+  // Nowhere clear: back to the longest.
+  expect(notePoint(points, () => false)).toEqual([100, 160])
 })

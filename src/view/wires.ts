@@ -1,7 +1,7 @@
 import { nodeOf, type Graph } from '../model/graph'
 import { Buckets } from '../geometry/buckets'
 import { separate } from '../geometry/lanes'
-import { bounds, halfway, type Point, type Rect } from '../geometry/rect'
+import { bounds, halfway, overlap, type Point, type Rect } from '../geometry/rect'
 import { CLEAR } from '../geometry/route'
 import { rounded } from '../geometry/svg-path'
 import { svg } from './dom'
@@ -9,18 +9,20 @@ import { svg } from './dom'
 // `r` with `m` px added on every side.
 const grow = ([x, y, w, h]: Rect, m: number): Rect => [x - m, y - m, w + 2 * m, h + 2 * m]
 
-// Where a wire's note goes: the middle of its longest inner segment, away from the first and last
-// ones, which wires fanning in or out of one anchor share. Halfway along wires without one.
-function notePoint(points: Point[]): Point {
-  let [best, length] = [-1, 0]
+/**
+ * Where a wire's note goes: the middle of its longest inner segment where `fits` says the note is
+ * clear of nodes, else of its longest one. Inner segments keep notes away from the first and last
+ * ones, which wires fanning in or out of one anchor share. Halfway along wires without any.
+ */
+export function notePoint(points: Point[], fits: (at: Point) => boolean): Point {
+  const mids: [length: number, mid: Point][] = []
   for (let i = 1; i < points.length - 2; i++) {
     const [p, q] = [points[i], points[i + 1]]
-    const len = Math.abs(q[0] - p[0]) + Math.abs(q[1] - p[1])
-    if (len > length) [best, length] = [i, len]
+    mids.push([Math.abs(q[0] - p[0]) + Math.abs(q[1] - p[1]), [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]])
   }
-  if (best < 0) return halfway(points)
-  const [p, q] = [points[best], points[best + 1]]
-  return [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]
+  if (!mids.length) return halfway(points)
+  mids.sort((a, b) => b[0] - a[0])
+  return (mids.find(([, mid]) => fits(mid)) ?? mids[0])[1]
 }
 
 /** Draws every wire of a graph as SVG and re-routes only the wires a node change can affect. */
@@ -185,7 +187,15 @@ export class Wires {
         this.notes.set(key, note)
       }
       if (note.textContent !== text) note.textContent = text
-      const [x, y] = notePoint(this.drawn.get(key)!).map(String)
+      // Estimated from the text rather than measured, which would cost a layout per note.
+      const w = text.length * 6.5 + 6
+      // ponytail: checks every node per candidate spot; bucket the nodes if notes x nodes gets big.
+      const fits = ([cx, cy]: Point) => {
+        const box: Rect = [cx - w / 2, cy - 8, w, 16]
+        for (const r of this.rects.values()) if (overlap(r, box)) return false
+        return true
+      }
+      const [x, y] = notePoint(this.drawn.get(key)!, fits).map(String)
       // Unchanged values are skipped: rewriting SVG geometry costs a layout even when equal.
       if (note.getAttribute('x') !== x) note.setAttribute('x', x)
       if (note.getAttribute('y') !== y) note.setAttribute('y', y)
