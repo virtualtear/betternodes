@@ -83,6 +83,7 @@ export class Sketch {
   readonly nodes = new Slots<string>(NODE_VERTEX * 6)
   readonly wires = new Slots<WireKey>(WIRE_VERTEX * 2 * (WIRE_POINTS - 1))
 
+  /** Writes node `id`'s record: its rect, fill and border. */
   node(id: string, [x, y, w, h]: Rect, fill: ArrayLike<number>, border: ArrayLike<number>) {
     const { nodes } = this
     const o = nodes.slot(id)
@@ -98,6 +99,7 @@ export class Sketch {
     }
   }
 
+  /** Writes wire `key`'s record: its {@link WIRE_POINTS} points and its stroke. */
   wire(key: WireKey, points: Point[], stroke: ArrayLike<number>) {
     const { wires } = this
     const o = wires.slot(key)

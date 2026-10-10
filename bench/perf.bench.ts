@@ -193,9 +193,9 @@ test('frames on a 1000-node graph', async () => {
   }
   f.select(...ids)
   await measure('frame: dragging 100 selected nodes (1000 nodes)', { budget: 8, runs: 60, run: dragBlock })
-  // The minimap redraws the moved nodes and re-measures the bounds of all of them. It reads the
-  // root size at frame start, which costs nothing in real frames but a layout here: back-to-back
-  // flushes have no paint in between to clean up the previous frame's writes.
+  // The minimap redraws the spots the moved nodes left and took. It reads the root size at frame
+  // start, which costs nothing in real frames but a layout here: back-to-back flushes have no paint
+  // in between to clean up the previous frame's writes.
   f.set({ minimap: true })
   frameNow(f)
   await measure('frame: dragging 100 selected nodes, minimap on (1000 nodes)', { budget: 8, runs: 60, run: dragBlock })
@@ -253,7 +253,7 @@ test('frames on a 1000-node graph', async () => {
   el.remove()
 })
 
-// Where the known limits show first: routing, wire scans and lanes grow with the graph.
+// The same scenarios on 5000 nodes: any work that walks the whole graph would show here first.
 test('first frame: mount 5000 nodes', async () => {
   let mounted: ReturnType<typeof mount>
   await measure('frame: mount 5000 nodes + 4843 wires', {

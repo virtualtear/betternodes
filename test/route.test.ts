@@ -28,7 +28,7 @@ test('long wires through a crowded graph almost never fall back to crossing a no
   const { rects, pairs } = scattered()
   const crossing = pairs.filter(([i, j]) =>
     crosses(route([rects[i][0] + 160, rects[i][1] + 18], [1, 0], [rects[j][0], rects[j][1] + 18], [-1, 0], rects), rects))
-  // 70 of 299 crossed before the search estimated bends; 6 do now, with room for small tuning.
+  // Without bends in the search's estimate, 70 of 299 cross; with them 6 do. The bound leaves room for small tuning.
   expect(crossing.length).toBeLessThanOrEqual(10)
 })
 

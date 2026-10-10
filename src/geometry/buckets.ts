@@ -36,7 +36,7 @@ function drop<T>(cell: Cell<T>, value: T) {
 
 /**
  * Spatial hash: rects bucketed into coarse square cells, so area queries only look at nearby rects.
- * @remarks Cell keys are numbers and queries allocate nothing, since free-spot searches call
+ * @remarks Cell keys are numbers, so lookups build no strings: free-spot searches call
  * {@link Buckets.empty} thousands of times. Huge, far-out or non-finite rects work too, just
  * without the speed-up.
  */

@@ -30,8 +30,8 @@ test('a cycle is cut where the walk from the first node meets it again', () => {
 })
 
 test('a chain far longer than the call stack is deep gets one column per node', () => {
-  // Wired against insertion order, so finding the first node's depth walks the whole chain: the
-  // recursive version overflowed the call stack between 2,000 and 5,000 nodes.
+  // Wired against insertion order, so finding the first node's depth walks the whole chain: a
+  // recursive walk overflows the call stack between 2,000 and 5,000 nodes.
   const ids = Array.from({ length: 20_000 }, (_, i) => `n${i}`)
   const columns = columnsOf(ids, ids.slice(1).map((id, i) => [id, ids[i]]))
   expect([columns[0], columns[ids.length - 1]]).toEqual([ids.length - 1, 0])

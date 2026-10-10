@@ -145,7 +145,7 @@ function build(gl: WebGL2RenderingContext, vertex: string, fragment: string, str
  * One WebGL2 canvas that draws every packet dot as a point in a single draw call and, far out, every
  * node and wire of a {@link Sketch} in one more call each.
  * @remarks Points and plain triangles beat instanced quads by far on software renderers such as
- * SwiftShader, and match them on GPUs.
+ * SwiftShader; on GPUs, points match them.
  */
 export class Gl {
   readonly canvas = h('canvas', 'bn-packets')
@@ -173,6 +173,7 @@ export class Gl {
     gl.clearColor(0, 0, 0, 0)
   }
 
+  /** Whether the browser took the context away, e.g. to free GPU memory. */
   get lost() {
     return this.gl.isContextLost()
   }
@@ -244,6 +245,7 @@ export class Gl {
     }
   }
 
+  /** Gives the context back and removes the canvas. */
   release() {
     this.gl.getExtension('WEBGL_lose_context')?.loseContext()
     this.canvas.remove()

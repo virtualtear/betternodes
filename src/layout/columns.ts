@@ -32,8 +32,8 @@ export function layout(graph: Graph, todo: NodeDef[], sizes: ReadonlyMap<string,
   const incoming = Map.groupBy(edges, ([, to]) => nodeOf(to))
   const depths = new Map<string, number>()
   const visiting = new Set<string>()
-  // Longest wire path into `root`, depth first. An explicit stack, not recursion: a chain wired
-  // against insertion order overflowed the call stack at a few thousand nodes.
+  // Longest wire path into `root`, depth first. An explicit stack, not recursion, which overflows the
+  // call stack on a chain of a few thousand nodes wired against insertion order.
   const depth = (root: string) => {
     const known = depths.get(root)
     if (known !== undefined) return known

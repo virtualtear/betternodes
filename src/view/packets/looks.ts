@@ -47,6 +47,7 @@ export class Looks {
     this.current.clear()
   }
 
+  /** The look of a dot with this class, read at most once per frame. */
   get(className: string) {
     let look = this.current.get(className)
     if (!look) this.current.set(className, (look = this.read(className)))

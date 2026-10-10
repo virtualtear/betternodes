@@ -36,7 +36,7 @@ export const isAnchor = (name: string): name is Anchor => Object.hasOwn(ANCHORS,
 
 /** Node id of a ref; node ids contain no dots, so the first dot splits. */
 export function nodeOf(ref: string) {
-  // Not split(), which builds an array per call: the wire loop calls this twice per wire per frame.
+  // Not split(), which builds an array per call: removals, layout and packet hops run this per wire.
   const dot = ref.indexOf('.')
   return dot < 0 ? ref : ref.slice(0, dot)
 }
@@ -248,6 +248,7 @@ export class Graph {
     return out
   }
 
+  /** The editor state: positions of the shown nodes, every wire, and the deleted node ids if any. */
   toState(): State {
     const positions: State['positions'] = {}
     for (const n of this.nodes.values()) positions[n.id] = [n.x, n.y]

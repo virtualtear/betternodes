@@ -37,6 +37,7 @@ export interface Ops {
   changed(journal: Journal): void
   undo(): void
   redo(): void
+  /** Fires a pointer event to the flow's listeners. */
   emit(...event: Emitted<InputEvents>): void
 }
 

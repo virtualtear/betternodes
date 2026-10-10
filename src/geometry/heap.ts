@@ -4,6 +4,7 @@ export class Heap {
   private vals = new Int32Array(256)
   size = 0
 
+  /** Adds `val` with priority `key`; lower keys come out first. */
   push(key: number, val: number) {
     if (this.size === this.keys.length) {
       const [keys, vals] = [new Float64Array(this.size * 2), new Int32Array(this.size * 2)]

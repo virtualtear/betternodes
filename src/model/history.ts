@@ -27,20 +27,22 @@ export class Journal {
     for (const n of nodes) if (!this.starts.has(n.id)) this.starts.set(n.id, [n.x, n.y])
   }
 
-  // A wire removed and added back within one edit, or the other way round, cancels out.
+  /** Records an added wire; one removed earlier in the same edit cancels out instead. */
   connected(key: WireKey, edge: Edge) {
     if (!this.removed.delete(key)) this.added.set(key, edge)
   }
 
+  /** Records a removed wire; one added earlier in the same edit cancels out instead. */
   disconnected(key: WireKey, edge: Edge) {
     if (!this.added.delete(key)) this.removed.set(key, edge)
   }
 
-  // Like wires, a node deleted and restored within one edit cancels out.
+  /** Records a deleted node; one restored earlier in the same edit cancels out instead. */
   deleted(id: string) {
     if (!this.back.delete(id)) this.trashed.add(id)
   }
 
+  /** Records a restored node; one deleted earlier in the same edit cancels out instead. */
   restored(id: string) {
     if (!this.trashed.delete(id)) this.back.add(id)
   }

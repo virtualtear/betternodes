@@ -208,7 +208,7 @@ function search(s: Point, t: Point, start: number, end: number, rects: Rect[], [
 /**
  * Costs, back links and expanded flags of one search's states, in typed arrays shared by every
  * search: a search reaches at most about 3 * BUDGET states, however large its grid. Grid-sized
- * arrays instead took 143 MB and 70 ms to fill for a long wire across 1000 scattered nodes.
+ * arrays would take 143 MB and 70 ms to fill for a long wire across 1000 scattered nodes.
  */
 class Table {
   static readonly SIZE = 1 << BITS

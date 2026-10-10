@@ -75,9 +75,9 @@ export interface FlowOptions {
    */
   minimap?: boolean
   /**
-   * Gives only nodes in or near the visible area an element, so a graph of any size pans and drags
-   * smoothly. Turn it off to keep every node's `content()` in the page, e.g. a video that must keep
-   * playing; then a frame costs time in proportion to the number of nodes.
+   * Gives only nodes in or near the visible area an element, so panning and dragging cost the same
+   * whatever the size of the graph. Turn it off to keep every node's `content()` in the page, e.g. a
+   * video that must keep playing; then a frame costs time in proportion to the number of nodes.
    * @defaultValue `true`
    */
   virtual?: boolean

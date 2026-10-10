@@ -158,7 +158,7 @@ export class Packets {
         continue
       }
       const track = this.view.track(p.wire)
-      if (!track) continue // wire not drawn yet
+      if (!track) continue // only for a wire that is gone
       const { length } = track
       p.t += length ? ((p.send.opts.speed ?? SPEED) * dt) / length : 1
       if (p.t >= 1) ends.push([p, nodeOf(edge[1]), false])

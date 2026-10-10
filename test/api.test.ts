@@ -158,7 +158,7 @@ test('load() drops positions that are not finite or too far out, with a warning,
   f.load({ positions: { a: [NaN, 0] }, edges: [] })
   expect(f.state().positions).toEqual({ a: [0, 0], b: [300, 0], c: [600, 0], d: [900, 0], e: [40, 200] })
   expect(warn.mock.calls).toEqual([['betternodes: dropped saved positions: 4 malformed'], ['betternodes: dropped saved positions: 1 malformed']])
-  // Such numbers used to make the spatial lookups of the next frame loop forever.
+  // Without the check, such numbers make the spatial lookups of the next frame loop forever.
   await frame()
 })
 

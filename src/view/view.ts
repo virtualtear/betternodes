@@ -264,7 +264,7 @@ export class View {
     this.update()
   }
 
-  /** Schedules a frame; wires are reconciled against the graph on every frame. */
+  /** Schedules one frame for however many changes come in before it runs. */
   update() {
     if (this.queued || this.destroyed) return
     this.queued = true
@@ -324,7 +324,7 @@ export class View {
     return `${ref}.${facing(this.box(ref), target)}`
   }
 
-  /** A node's rect in world px: position and measured size. */
+  /** A node's rect in world px: its position, and its measured size or, before it has one, the guess. */
   box(id: string): Rect {
     const { x, y } = this.graph.nodes.get(id)!
     const [w, h] = this.sizes.get(id) ?? this.guess
@@ -337,8 +337,8 @@ export class View {
     return route(pa, axis(anchorOf(a)), pb, axis(anchorOf(b)), near(reach(pa, pb)))
   }
 
-  // One frame. All DOM writes come first, then all reads, so the browser lays out once per frame;
-  // the steps after measuring only write transforms, which need no new layout.
+  // One frame. Writes come before reads, so the browser lays out once per frame: nothing after the
+  // measuring step reads layout, and the theme check, which reads style, runs at most twice a second.
   private flush(now: number) {
     this.queued = false
     // Read before this frame's writes, which a read would otherwise have to lay out first.
@@ -654,8 +654,8 @@ export class View {
     this.stale.add(n.id)
   }
 
-  // Includes bn-selected, and writes only a changed class list: dropping it here for the overlay pass to
-  // add back cost two style invalidations per selected node in every frame of a drag.
+  // Includes bn-selected, and writes only a changed class list: leaving bn-selected to the overlay pass
+  // would cost two style invalidations per selected node in every frame of a drag.
   private renderPlace(n: NodeDef) {
     const classes = ['bn-node', ...n.classes ?? []]
     if (this.dragging.has(n.id)) classes.push('bn-dragging')
