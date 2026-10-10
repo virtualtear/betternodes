@@ -21,15 +21,33 @@ export function layout(graph: Graph, sizes: Map<string, Point>, grid: number) {
   const incoming = Map.groupBy(graph.edges.values(), ([, to]) => nodeOf(to))
   const depths = new Map<string, number>()
   const visiting = new Set<string>()
-  const depth = (id: string): number => {
-    if (depths.has(id)) return depths.get(id)!
-    if (visiting.has(id)) return -1 // back edge of a cycle: ignore it
-    visiting.add(id)
-    let d = 0
-    for (const [from] of incoming.get(id) ?? []) d = Math.max(d, depth(nodeOf(from)) + 1)
-    visiting.delete(id)
-    depths.set(id, d)
-    return d
+  // Longest wire path into `root`, depth first. An explicit stack, not recursion: a chain wired
+  // against insertion order overflowed the call stack at a few thousand nodes.
+  const depth = (root: string) => {
+    const known = depths.get(root)
+    if (known !== undefined) return known
+    const stack = [{ id: root, from: incoming.get(root) ?? [], next: 0, d: 0 }]
+    visiting.add(root)
+    while (stack.length) {
+      const top = stack[stack.length - 1]
+      if (top.next < top.from.length) {
+        const id = nodeOf(top.from[top.next++][0])
+        const d = depths.get(id)
+        // A node still being walked closes a cycle: that wire counts as coming from depth -1.
+        if (d !== undefined || visiting.has(id)) top.d = Math.max(top.d, (d ?? -1) + 1)
+        else {
+          visiting.add(id)
+          stack.push({ id, from: incoming.get(id) ?? [], next: 0, d: 0 })
+        }
+        continue
+      }
+      stack.pop()
+      visiting.delete(top.id)
+      depths.set(top.id, top.d)
+      const below = stack[stack.length - 1]
+      if (below) below.d = Math.max(below.d, top.d + 1)
+    }
+    return depths.get(root)!
   }
 
   const columns: string[][] = []
