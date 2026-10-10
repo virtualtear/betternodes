@@ -22,6 +22,9 @@ export function notePoint(points: Point[], fits: (at: Point) => boolean): Point 
   return (mids.find(([, mid]) => fits(mid)) ?? mids[0])[1]
 }
 
+const same = (a: Point[] | undefined, b: Point[]) =>
+  a?.length === b.length && a.every((p, i) => p[0] === b[i][0] && p[1] === b[i][1])
+
 /** Draws every wire of a graph as SVG and re-routes only the wires a node change can affect. */
 export class Wires {
   // One <g data-wire> per wire: a visible path plus a wide transparent one to grab it by.
@@ -145,7 +148,7 @@ export class Wires {
   private forget(key: string) {
     this.groups.get(key)?.remove()
     this.notes.get(key)?.remove()
-    for (const map of [this.groups, this.boxes, this.routes, this.notes]) map.delete(key)
+    for (const map of [this.groups, this.boxes, this.routes, this.notes, this.tracks]) map.delete(key)
   }
 
   private translate(key: string, [dx, dy]: Point) {
@@ -154,15 +157,16 @@ export class Wires {
     this.boxes.set(key, [x + dx, y + dy, w, h])
   }
 
-  // Lanes depend on every wire in a corridor, so all are re-spread; only changed paths are written.
+  // Lanes depend on every wire in a corridor, so all are re-spread. Only wires whose points changed
+  // get a new path and track: packets on the others keep theirs.
   private redraw() {
+    const last = this.drawn
     this.drawn = separate(this.routes)
-    this.tracks.clear()
     for (const [key, points] of this.drawn) {
+      if (same(last.get(key), points)) continue
+      this.tracks.delete(key)
       const d = rounded(points)
-      const g = this.groups.get(key)!
-      if (g.firstElementChild!.getAttribute('d') === d) continue
-      for (const path of g.children) path.setAttribute('d', d)
+      for (const path of this.groups.get(key)!.children) path.setAttribute('d', d)
     }
   }
 
