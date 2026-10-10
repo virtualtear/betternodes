@@ -55,7 +55,7 @@ f.connect('hook', 'mail', { label: 'new order' })
 Not on npm yet. Install from GitHub:
 
 ```sh
-npm install --allow-git=root github:virtualtear/betternodes#v0.1.0
+npm install --allow-git=root github:virtualtear/betternodes#v0.2.0
 ```
 
 npm 12 and later need `--allow-git=root`, or `allow-git=root` in your `.npmrc`. npm builds
