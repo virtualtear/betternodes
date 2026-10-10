@@ -1,6 +1,9 @@
 import { expect, test } from 'vitest'
+import type { Point, Rect } from '../src/geometry/rect'
 import { flow } from '../src/index'
-import { notePoint } from '../src/view/wires'
+import { Graph } from '../src/model/graph'
+import { svg } from '../src/view/dom'
+import { notePoint, Wires } from '../src/view/wires'
 import { center, click, container, drag, frame, press, wirePoint } from './util'
 
 /** A at 20,20 and B at 320,140, with a noted wire from `a.e` to `b.w`, mounted and rendered. */
@@ -153,4 +156,24 @@ test('wire classes must be single class names, so a bad one throws at the call i
   f.wireClass('a.e', 'b.w', 'error')
   await frame()
   expect(el.querySelector('[data-wire="a.e>b.w"]')!.classList.contains('error')).toBe(true)
+})
+
+test('a node coming near a note moves it, even when the wire keeps its route', () => {
+  const graph = new Graph()
+  for (const id of ['a', 'b']) graph.nodes.set(id, { id, title: id, x: 0, y: 0 })
+  graph.connect('a', 'b')
+  graph.label('a', 'b', 'a long label text')
+  const rects = new Map<string, Rect>([['a', [-100, -10, 100, 20]], ['b', [110, 140, 100, 20]]])
+  // Its longest inner segment is the vertical one at x 100, just inside the wire's right edge.
+  const points: Point[] = [[0, 0], [10, 0], [10, -50], [100, -50], [100, 150], [110, 150]]
+  const layer = svg('g')
+  const wires = new Wires(graph, layer, id => rects.get(id)!, () => points)
+  const spot = () => ['x', 'y'].map(name => Number(layer.querySelector('.bn-label')!.getAttribute(name)))
+  wires.render(new Set(['a', 'b']))
+  expect(spot()).toEqual([100, 50])
+  // Too far from the wire to re-route it, but on the note's right half.
+  graph.nodes.set('c', { id: 'c', title: 'c', x: 0, y: 0 })
+  rects.set('c', [125, 40, 30, 20])
+  wires.render(new Set(['c']))
+  expect(spot()).toEqual([55, -50])
 })

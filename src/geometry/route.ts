@@ -40,18 +40,23 @@ function simplify(points: Point[]) {
 }
 
 /**
+ * The area a wire from `a` to `b` is routed in: obstacles outside it are ignored.
+ * @remarks Spans both full-length stubs plus a margin, so it holds every node a stub can hit.
+ */
+export const reach = (a: Point, b: Point) => inflate(bounds([a, b]), STUB + REGION + CLEAR)
+
+/**
  * Waypoints of a right-angled wire from `a` to `b` that avoids `obstacles`.
  * @param da - axis-aligned direction the wire leaves `a` in.
  * @param db - axis-aligned direction pointing out of `b`'s node; the wire arrives against it.
+ * @param obstacles - may be any superset of the ones within {@link reach}, duplicates included.
  * @returns at least `[a, b]`; never fails, but falls back to a simple Z shape (which may cross a
  * node) when no route is found within the search budget, or the area is too crowded to search.
  */
-// ponytail: obstacles are scanned linearly and limited to a region around the wire; add a spatial
-// index if graphs pass ~2k nodes, and a wider region if far detours start crossing nodes.
+// ponytail: only nodes within reach() count; widen it if far detours start crossing nodes.
 export function route(a: Point, da: Point, b: Point, db: Point, obstacles: Rect[]): Point[] {
-  // Spans both full-length stubs plus a margin, so it holds every node a stub can hit.
-  const region = inflate(bounds([a, b]), STUB + REGION)
-  const nearby = obstacles.filter(r => overlap(r, region, CLEAR))
+  const area = reach(a, b)
+  const nearby = obstacles.filter(r => overlap(r, area))
   const s = stub(a, da, nearby)
   const t = stub(b, db, nearby)
   // Full clearance where there is room; between close nodes, squeeze through a thin margin instead.

@@ -32,7 +32,11 @@ export type Anchor = keyof typeof ANCHORS
 export const isAnchor = (name: string): name is Anchor => Object.hasOwn(ANCHORS, name)
 
 /** Node id of a ref; node ids contain no dots, so the first dot splits. */
-export const nodeOf = (ref: string) => ref.split('.', 1)[0]
+export function nodeOf(ref: string) {
+  // Not split(), which builds an array per call: the wire loop calls this twice per wire per frame.
+  const dot = ref.indexOf('.')
+  return dot < 0 ? ref : ref.slice(0, dot)
+}
 
 /** Anchor name of a `'nodeId.anchor'` ref. */
 export const anchorOf = (ref: string) => ref.slice(ref.indexOf('.') + 1) as Anchor

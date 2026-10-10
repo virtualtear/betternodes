@@ -295,6 +295,29 @@ test('frames on a 5000-node graph', async () => {
   el.remove()
 })
 
+// Status classes on every wire, as an app colouring wires by state would set them.
+test('frames with a class on every wire, 5000 nodes', async () => {
+  const { el, f } = mount(5000)
+  for (const [from, to] of graphOf(f).edges.values()) f.wireClass(from, to, 'ok')
+  frameNow(f)
+  frameNow(f)
+  let step = 0
+  const dragged = graphOf(f).nodes.get('n2500')!
+  await measure('frame: dragging one node, every wire classed (5000 nodes)', {
+    budget: 16,
+    runs: 30,
+    run: () => {
+      view(f).dragging = new Set(['n2500'])
+      dragged.x = gridAt(2500)[0] + (++step % 10) * 20
+      dragged.y = gridAt(2500)[1] + 60
+      view(f).place('n2500')
+      frameNow(f)
+    },
+  })
+  f.destroy()
+  el.remove()
+})
+
 // Wire notes are placed clear of nodes, which checks node rects for every candidate spot. The wires
 // bend (one row down, one column over), so each note has an inner segment to try.
 function labelled(n: number, notes: number) {
@@ -307,7 +330,7 @@ function labelled(n: number, notes: number) {
   return mounted
 }
 
-for (const [n, notes, budget] of [[1000, 200, 8], [5000, 1000, 40]]) {
+for (const [n, notes, budget] of [[1000, 200, 8], [5000, 1000, 16]]) {
   test(`frames with ${notes} labelled bent wires, ${n} nodes`, async () => {
     const { el, f } = labelled(n, notes)
     frameNow(f)

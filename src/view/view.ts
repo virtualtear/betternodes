@@ -1,5 +1,5 @@
 import { GRID, clamp, fitInto, frameAround, union, type Point, type Rect } from '../geometry/rect'
-import { route } from '../geometry/route'
+import { reach, route } from '../geometry/route'
 import { curve } from '../geometry/svg-path'
 import { layout } from '../layout/columns'
 import { untangle } from '../layout/untangle'
@@ -83,7 +83,7 @@ export class View {
     // Focusable, so a click inside it lets Delete and Escape reach its keydown listener.
     this.tabbed = !root.hasAttribute('tabindex')
     if (this.tabbed) root.tabIndex = -1
-    this.wires = new Wires(graph, this.notes, id => this.box(id), (from, to, obstacles) => this.wire(from, to, obstacles))
+    this.wires = new Wires(graph, this.notes, id => this.box(id), (from, to, near) => this.wire(from, to, near))
     this.groups = new Groups(graph, this.svg)
     this.svg.append(arrowDefs(), this.notes, this.preview, this.packets)
     this.world.append(this.svg)
@@ -250,9 +250,10 @@ export class View {
     return [x, y, w, h]
   }
 
-  private wire(from: string, to: string, obstacles: Rect[]) {
+  private wire(from: string, to: string, near: (area: Rect) => Rect[]) {
     const [a, b] = [this.resolve(from, to), this.resolve(to, from)]
-    return route(this.anchor(a), axis(anchorOf(a)), this.anchor(b), axis(anchorOf(b)), obstacles)
+    const [pa, pb] = [this.anchor(a), this.anchor(b)]
+    return route(pa, axis(anchorOf(a)), pb, axis(anchorOf(b)), near(reach(pa, pb)))
   }
 
   // One frame. All DOM writes come first, then all reads, so the browser lays out once per frame;

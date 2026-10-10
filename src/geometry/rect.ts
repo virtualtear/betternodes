@@ -24,13 +24,9 @@ export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.mi
 /** `r` with `m` px added on every side. */
 export const inflate = ([x, y, w, h]: Rect, m: number): Rect => [x - m, y - m, w + 2 * m, h + 2 * m]
 
-/**
- * Whether two rects' interiors overlap; touching edges don't count. With a `margin`, anything
- * closer than that counts as overlapping too.
- */
+/** Whether two rects' interiors overlap; touching edges don't count. */
 // Index access, not destructuring: this runs millions of times in routing and free-spot searches.
-export const overlap = (a: Rect, b: Rect, margin = 0) =>
-  a[0] - margin < b[0] + b[2] && b[0] < a[0] + a[2] + margin && a[1] - margin < b[1] + b[3] && b[1] < a[1] + a[3] + margin
+export const overlap = (a: Rect, b: Rect) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
 
 /** Bounding box of a list of points. */
 export function bounds(points: Iterable<Point>): Rect {
