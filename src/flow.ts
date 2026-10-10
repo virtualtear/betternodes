@@ -78,8 +78,7 @@ export class Flow {
     if (id === '__proto__') fail('node id "__proto__" is reserved')
     let def = this.graph.nodes.get(id) ?? this.graph.trash.get(id)
     if (!def) {
-      def = { id, title: id, x: 0, y: 0 }
-      this.graph.nodes.set(id, def)
+      def = this.graph.add(id)
       this.view.mark(id)
     }
     return new NodeBuilder(def, this.view)

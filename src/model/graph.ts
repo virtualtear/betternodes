@@ -1,5 +1,5 @@
 import { WORLD } from '../geometry/rect'
-import { wireKey, type Edge, type State } from './state'
+import { wireKey, type Edge, type State, type WireKey } from './state'
 
 /** A node as defined in code; x/y are world coordinates. */
 export interface NodeDef {
@@ -12,6 +12,8 @@ export interface NodeDef {
   classes?: string[]
   /** Whether x/y were set explicitly (code, saved state or a drag); auto-layout skips these. */
   placed?: boolean
+  /** Order of definition: of two overlapping nodes, the later one moves. */
+  seq: number
 }
 
 /** A group as defined in code: a titled frame drawn around its member nodes. */
@@ -41,6 +43,8 @@ export function nodeOf(ref: string) {
 /** Anchor name of a `'nodeId.anchor'` ref. */
 export const anchorOf = (ref: string) => ref.slice(ref.indexOf('.') + 1) as Anchor
 
+const NONE: ReadonlySet<never> = new Set()
+
 const warn = (message: string) => console.warn(`betternodes: dropped saved ${message}`)
 
 // Numbers are checked against WORLD, not just for being finite: JSON turns 1e309 into Infinity, and
@@ -63,18 +67,35 @@ function valid<E, T extends E>(entries: E[], ok: (entry: E) => entry is T, what:
 /** Pure graph model, no DOM. */
 export class Graph {
   readonly nodes = new Map<string, NodeDef>()
-  readonly edges = new Map<string, Edge>()
+  readonly edges = new Map<WireKey, Edge>()
   /** Deleted nodes, kept so undo or `load()` can bring them back. */
   readonly trash = new Map<string, NodeDef>()
   /** Wire notes by wire key; they outlive their wire, so a wire brought back gets its note back. */
-  readonly labels = new Map<string, string>()
+  readonly labels = new Map<WireKey, string>()
   /** Extra CSS classes by wire key; they outlive their wire like notes. */
-  readonly classes = new Map<string, string[]>()
+  readonly classes = new Map<WireKey, string[]>()
   readonly groups = new Map<string, GroupDef>()
   /** Group id per node id, so a node is in at most one group. Kept for deleted nodes too. */
   readonly memberOf = new Map<string, string>()
   /** Bumped on every change to wires or nodes, so derived lookups know when to rebuild. */
   version = 0
+  // The wires at each node, in or out, so a node's wires are found without walking all of them.
+  private readonly at = new Map<string, Set<WireKey>>()
+  // Member ids per group, the reverse of memberOf.
+  private readonly held = new Map<string, Set<string>>()
+  private seq = 0
+
+  /** Defines node `id` at the origin, ranked after every node defined before it. */
+  add(id: string) {
+    const def: NodeDef = { id, title: id, x: 0, y: 0, seq: this.seq++ }
+    this.nodes.set(id, def)
+    return def
+  }
+
+  /** Keys of the wires that start or end at node `id`. */
+  wiresAt(id: string): ReadonlySet<WireKey> {
+    return this.at.get(id) ?? NONE
+  }
 
   /** True if both refs name existing anchors or nodes, on different nodes, and the wire is new. */
   canConnect(from: string, to: string) {
@@ -84,16 +105,19 @@ export class Graph {
   /** @throws if {@link Graph.canConnect} rejects the wire. */
   connect(from: string, to: string) {
     if (!this.canConnect(from, to)) throw new Error(`betternodes: invalid wire ${from} -> ${to}`)
-    this.edges.set(wireKey(from, to), [from, to])
+    const key = wireKey(from, to)
+    this.edges.set(key, [from, to])
+    this.link(nodeOf(from), key)
+    this.link(nodeOf(to), key)
     this.version++
   }
 
   /** @returns false if there was no such wire. */
   disconnect(from: string, to: string) {
-    const had = this.edges.delete(wireKey(from, to))
+    if (!this.unlink(wireKey(from, to))) return false
     // Only real changes: a bump makes the next frame re-check every wire.
-    if (had) this.version++
-    return had
+    this.version++
+    return true
   }
 
   /**
@@ -125,6 +149,7 @@ export class Graph {
       if (n) Object.assign(n, { x, y, placed: true })
     }
     this.edges.clear()
+    this.at.clear()
     for (const [from, to] of edges) {
       if (this.canConnect(from, to)) this.connect(from, to)
       else warn(`wire ${from} -> ${to}`)
@@ -133,7 +158,7 @@ export class Graph {
   }
 
   /**
-   * Moves nodes to the trash and deletes their wires, in one pass over the wires however many go.
+   * Moves nodes to the trash and deletes their wires.
    * @returns the ids that were nodes; unknown ones are skipped.
    */
   remove(ids: Iterable<string>) {
@@ -145,9 +170,18 @@ export class Graph {
       this.trash.set(id, n)
       gone.add(id)
     }
-    if (!gone.size) return gone
-    this.version++
-    for (const [key, [from, to]] of this.edges) if (gone.has(nodeOf(from)) || gone.has(nodeOf(to))) this.edges.delete(key)
+    // Only far ends that stay need their sets updated: a removed node's whole set goes.
+    for (const id of gone) {
+      for (const key of this.wiresAt(id)) {
+        const edge = this.edges.get(key)
+        if (!edge) continue // deleted from its other end already
+        this.edges.delete(key)
+        const far = nodeOf(edge[0]) === id ? nodeOf(edge[1]) : nodeOf(edge[0])
+        if (!gone.has(far)) this.at.get(far)?.delete(key)
+      }
+      this.at.delete(id)
+    }
+    if (gone.size) this.version++
     return gone
   }
 
@@ -163,18 +197,27 @@ export class Graph {
 
   /** Makes `ids` the members of `group`, taking them out of any other group. */
   setMembers(group: string, ids: string[]) {
-    for (const [id, g] of this.memberOf) if (g === group) this.memberOf.delete(id)
-    for (const id of ids) this.memberOf.set(id, group)
+    for (const id of this.held.get(group) ?? []) this.memberOf.delete(id)
+    this.held.delete(group)
+    for (const id of ids) {
+      const old = this.memberOf.get(id)
+      if (old !== undefined) this.held.get(old)?.delete(id)
+      this.memberOf.set(id, group)
+    }
+    if (ids.length) this.held.set(group, new Set(ids))
+  }
+
+  /** Ids of the shown members of `group`. */
+  membersOf(group: string) {
+    return [...this.held.get(group) ?? []].filter(id => this.nodes.has(id))
   }
 
   /** Member ids of every group that has members shown. */
   members() {
     const out = new Map<string, string[]>()
-    for (const [id, g] of this.memberOf) {
-      if (!this.nodes.has(id)) continue
-      const list = out.get(g)
-      if (list) list.push(id)
-      else out.set(g, [id])
+    for (const group of this.held.keys()) {
+      const ids = this.membersOf(group)
+      if (ids.length) out.set(group, ids)
     }
     return out
   }
@@ -187,12 +230,27 @@ export class Graph {
     return state
   }
 
+  private link(id: string, key: WireKey) {
+    const keys = this.at.get(id)
+    if (keys) keys.add(key)
+    else this.at.set(id, new Set([key]))
+  }
+
+  private unlink(key: WireKey) {
+    const edge = this.edges.get(key)
+    if (!edge) return false
+    this.edges.delete(key)
+    this.at.get(nodeOf(edge[0]))?.delete(key)
+    this.at.get(nodeOf(edge[1]))?.delete(key)
+    return true
+  }
+
   // A bare node id is a valid ref too: the view picks its anchor per render.
   private has(ref: string) {
     return this.nodes.has(nodeOf(ref)) && (!ref.includes('.') || isAnchor(anchorOf(ref)))
   }
 
-  private patch<V>(map: Map<string, V>, key: string, value: V | undefined) {
+  private patch<V>(map: Map<WireKey, V>, key: WireKey, value: V | undefined) {
     if (value === undefined) map.delete(key)
     else map.set(key, value)
     this.version++

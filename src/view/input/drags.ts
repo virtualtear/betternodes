@@ -1,7 +1,7 @@
 import { GRID, bounds, overlap, snap, type Rect } from '../../geometry/rect'
 import { freeSpots } from '../../layout/untangle'
 import type { NodeDef } from '../../model/graph'
-import { wireKey, type Edge, type State } from '../../model/state'
+import { wireKey, type Edge, type State, type WireKey } from '../../model/state'
 import { dataOf } from '../dom'
 import { gesture, isClick } from './gesture'
 import type { Input } from './interact'
@@ -45,7 +45,7 @@ export function dragWire(input: Input, fixed: string, make: (dropped: string) =>
 }
 
 /** Picks up the end of wire `key` nearer the pointer and drags it; the other end stays put. */
-export function grabWire(input: Input, e: PointerEvent, key: string) {
+export function grabWire(input: Input, e: PointerEvent, key: WireKey) {
   const { view, graph } = input
   const wire = graph.edges.get(key)!
   const [from, to] = wire

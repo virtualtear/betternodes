@@ -4,8 +4,8 @@ import { CLEAR } from './route'
 // Gap between neighbouring wires that share a lane, in world px.
 const LANE = 6
 
-interface Segment {
-  key: string
+interface Segment<K> {
+  key: K
   // Index of the segment's first point in its wire.
   i: number
   lo: number
@@ -18,11 +18,11 @@ interface Segment {
  * spread stays inside the clearance band, so no lane touches a node. Shifted wires come back as
  * copies, all others as the input arrays themselves: neither side may change them in place.
  */
-export function separate(wires: Map<string, Point[]>) {
+export function separate<K extends string>(wires: Map<K, Point[]>) {
   const out = new Map(wires)
   // Middle segments grouped by the line they run on: horizontal ones by y, vertical ones by x.
   // Number keys, not strings: this runs in every frame that re-routes a wire.
-  const lines = [new Map<number, Segment[]>(), new Map<number, Segment[]>()]
+  const lines = [new Map<number, Segment<K>[]>(), new Map<number, Segment<K>[]>()]
   for (const [key, pts] of wires) {
     for (let i = 1; i < pts.length - 2; i++) {
       const [p, q] = [pts[i], pts[i + 1]]
@@ -51,7 +51,7 @@ export function separate(wires: Map<string, Point[]>) {
 }
 
 // Shifts one cluster's segments into evenly spaced lanes, copying a wire before its first shift.
-function spread(lane: Segment[], across: number, wires: Map<string, Point[]>, out: Map<string, Point[]>) {
+function spread<K extends string>(lane: Segment<K>[], across: number, wires: Map<K, Point[]>, out: Map<K, Point[]>) {
   lane.sort((s, t) => (s.key < t.key ? -1 : 1))
   const gap = Math.min(LANE, (2 * (CLEAR - 2)) / (lane.length - 1))
   lane.forEach((seg, k) => {

@@ -4,6 +4,7 @@ import { bounds, halfway, inflate, overlap, type Point, type Rect } from '../geo
 import { CLEAR } from '../geometry/route'
 import { rounded, Track } from '../geometry/svg-path'
 import { nodeOf, type Graph } from '../model/graph'
+import type { WireKey } from '../model/state'
 import { setAttrs, svg } from './dom'
 
 /**
@@ -57,21 +58,21 @@ const same = (a: Point[] | undefined, b: Point[]) =>
 /** Draws every wire of a graph as SVG and re-routes only the wires a node change can affect. */
 export class Wires {
   // One <g data-wire> per wire: a visible path plus a wide transparent one to grab it by.
-  private readonly groups = new Map<string, SVGGElement>()
+  private readonly groups = new Map<WireKey, SVGGElement>()
   // Each wire's routed bounding box, and every node's rect as of the last render: together they
   // tell which wires a moving node may now block or free.
-  private readonly boxes = new Map<string, Rect>()
+  private readonly boxes = new Map<WireKey, Rect>()
   private rects = new Map<string, Rect>()
   // Spots of nodes removed since the last render: wires that went around them can straighten out.
   private readonly freed: Rect[] = []
   // Waypoints per wire, before and after lane separation.
-  private readonly routes = new Map<string, Point[]>()
-  private drawn = new Map<string, Point[]>()
+  private readonly routes = new Map<WireKey, Point[]>()
+  private drawn = new Map<WireKey, Point[]>()
   // Built when a packet first needs one, dropped on every re-route.
-  private readonly tracks = new Map<string, Track>()
-  private readonly notes = new Map<string, SVGTextElement>()
+  private readonly tracks = new Map<WireKey, Track>()
+  private readonly notes = new Map<WireKey, SVGTextElement>()
   // Classes from Graph.classes as last applied to each wire's elements.
-  private readonly applied = new Map<string, string[]>()
+  private readonly applied = new Map<WireKey, string[]>()
   // Graph version at the last render.
   private seen = -1
 
@@ -89,12 +90,12 @@ export class Wires {
   ) {}
 
   /** A drawn wire's elements: its `<g data-wire>` group, plus its note if it has one. */
-  parts(key: string) {
+  parts(key: WireKey) {
     return [this.groups.get(key), this.notes.get(key)].filter(el => el !== undefined)
   }
 
   /** The track of a wire's visible path, once it has been drawn. */
-  track(key: string) {
+  track(key: WireKey) {
     let track = this.tracks.get(key)
     const points = this.drawn.get(key)
     if (!track && points) this.tracks.set(key, (track = new Track(points)))
@@ -147,7 +148,7 @@ export class Wires {
       }
     }
     // Collected first, so the obstacle lookup knows how many routes it serves.
-    const pending: [key: string, from: string, to: string][] = []
+    const pending: [key: WireKey, from: string, to: string][] = []
     for (const [key, [from, to]] of this.graph.edges) {
       const [f, t] = [nodeOf(from), nodeOf(to)]
       if (!this.groups.has(key)) this.create(key)
@@ -171,12 +172,12 @@ export class Wires {
       this.boxes.set(key, bounds(points))
       this.routes.set(key, points)
     }
-    const redrawn = rerouted || pending.length ? this.redraw() : new Set<string>()
+    const redrawn = rerouted || pending.length ? this.redraw() : new Set<WireKey>()
     this.renderNotes(redrawn, spots, obstacles)
     if (changed) this.renderClasses()
   }
 
-  private create(key: string) {
+  private create(key: WireKey) {
     const g = svg('g')
     g.dataset.wire = key
     g.append(svg('path', 'bn-wire'), svg('path', 'bn-hit'))
@@ -184,13 +185,13 @@ export class Wires {
     this.layer.before(g)
   }
 
-  private forget(key: string) {
+  private forget(key: WireKey) {
     this.groups.get(key)?.remove()
     this.notes.get(key)?.remove()
     for (const map of [this.groups, this.boxes, this.routes, this.notes, this.tracks]) map.delete(key)
   }
 
-  private translate(key: string, [dx, dy]: Point) {
+  private translate(key: WireKey, [dx, dy]: Point) {
     this.routes.set(key, this.routes.get(key)!.map(([x, y]): Point => [x + dx, y + dy]))
     const [x, y, w, h] = this.boxes.get(key)!
     this.boxes.set(key, [x + dx, y + dy, w, h])
@@ -200,7 +201,7 @@ export class Wires {
   // get a new path and track: packets on the others keep theirs. Returns the keys of those wires.
   private redraw() {
     const last = this.drawn
-    const redrawn = new Set<string>()
+    const redrawn = new Set<WireKey>()
     this.drawn = separate(this.routes)
     for (const [key, points] of this.drawn) {
       if (same(last.get(key), points)) continue
@@ -230,13 +231,13 @@ export class Wires {
 
   // A note moves only when it is new, its text changed, its wire was redrawn, or a node moved or
   // went near it (`spots`), since its spot depends on nothing else.
-  private renderNotes(redrawn: ReadonlySet<string>, spots: Buckets<null>, obstacles: Obstacles) {
+  private renderNotes(redrawn: ReadonlySet<WireKey>, spots: Buckets<null>, obstacles: Obstacles) {
     for (const [key, note] of this.notes) {
       if (this.graph.labels.has(key)) continue
       note.remove()
       this.notes.delete(key)
     }
-    const due: [key: string, note: SVGTextElement, width: number][] = []
+    const due: [key: WireKey, note: SVGTextElement, width: number][] = []
     for (const [key, text] of this.graph.labels) {
       if (!this.groups.has(key)) continue // wire gone for now; undo may bring it back
       let note = this.notes.get(key)

@@ -1,4 +1,5 @@
 import { nodeOf, type Graph } from '../../model/graph'
+import type { WireKey } from '../../model/state'
 import type { View } from '../view'
 import type { Dot } from './dots'
 
@@ -22,7 +23,7 @@ export interface SendOptions {
 interface Send {
   to?: string
   // Flow sends use each wire at most once, which also ends cycles.
-  used: Set<string>
+  used: Set<WireKey>
   opts: SendOptions
   arrived: string[]
   // Packets still travelling; the send resolves when this reaches 0.
@@ -32,7 +33,7 @@ interface Send {
 
 interface Packet {
   send: Send
-  wire: string
+  wire: WireKey
   // The node it left; where it re-plans from if its wire disappears.
   from: string
   // Progress along the wire's current path, 0..1, so re-routed wires carry the packet along.
@@ -44,9 +45,6 @@ interface Packet {
 export class Packets {
   private readonly live = new Set<Packet>()
   private last = 0
-  // Outgoing wires per node, rebuilt only when the graph changes: many packets plan hops per frame.
-  private readonly outs = new Map<string, [wire: string, next: string][]>()
-  private outsVersion = -1
 
   constructor(private readonly view: View, private readonly graph: Graph) {
     view.onFrame = now => this.step(now)
@@ -95,7 +93,7 @@ export class Packets {
     }
   }
 
-  private launch(send: Send, wire: string) {
+  private launch(send: Send, wire: WireKey) {
     if (!this.live.size) this.last = performance.now() // first packet after idle: no stale frame delta
     const dot = this.view.dots.add(send.opts.class)
     this.live.add({ send, wire, from: nodeOf(this.graph.edges.get(wire)![0]), t: 0, dot })
@@ -121,7 +119,7 @@ export class Packets {
 
   // First wire of a shortest path (fewest hops, along wire direction) from `from` to `to`.
   private hop(from: string, to: string) {
-    const first = new Map<string, string>()
+    const first = new Map<string, WireKey>()
     const queue = [from]
     const seen = new Set(queue)
     // An index instead of queue.shift(), which re-indexes the whole array on every call.
@@ -137,17 +135,14 @@ export class Packets {
     }
   }
 
+  // The wires leaving `node`, each with the node it leads to.
   private out(node: string) {
-    if (this.outsVersion !== this.graph.version) {
-      this.outs.clear()
-      for (const [wire, [a, b]] of this.graph.edges) {
-        const list = this.outs.get(nodeOf(a)) ?? []
-        list.push([wire, nodeOf(b)])
-        this.outs.set(nodeOf(a), list)
-      }
-      this.outsVersion = this.graph.version
+    const out: [wire: WireKey, next: string][] = []
+    for (const wire of this.graph.wiresAt(node)) {
+      const [from, to] = this.graph.edges.get(wire)!
+      if (nodeOf(from) === node) out.push([wire, nodeOf(to)])
     }
-    return this.outs.get(node) ?? []
+    return out
   }
 
   private step(now: number) {

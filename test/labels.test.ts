@@ -160,7 +160,7 @@ test('wire classes must be single class names, so a bad one throws at the call i
 
 test('a node coming near a note moves it, even when the wire keeps its route', () => {
   const graph = new Graph()
-  for (const id of ['a', 'b']) graph.nodes.set(id, { id, title: id, x: 0, y: 0 })
+  for (const id of ['a', 'b']) graph.add(id)
   graph.connect('a', 'b')
   graph.label('a', 'b', 'a long label text')
   const rects = new Map<string, Rect>([['a', [-100, -10, 100, 20]], ['b', [110, 140, 100, 20]]])
@@ -172,7 +172,7 @@ test('a node coming near a note moves it, even when the wire keeps its route', (
   wires.render(new Set(['a', 'b']))
   expect(spot()).toEqual([100, 50])
   // Too far from the wire to re-route it, but on the note's right half.
-  graph.nodes.set('c', { id: 'c', title: 'c', x: 0, y: 0 })
+  graph.add('c')
   rects.set('c', [125, 40, 30, 20])
   wires.render(new Set(['c']))
   expect(spot()).toEqual([55, -50])

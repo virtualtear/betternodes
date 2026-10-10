@@ -21,8 +21,13 @@ export interface Diff {
   nodesRestored: string[]
 }
 
+declare const wire: unique symbol
+
+/** A wire's key in the graph's maps; only {@link wireKey} makes one, so a ref can't pass for it. */
+export type WireKey = string & { readonly [wire]: true }
+
 /** Map key of the wire from `from` to `to`; unique because node ids contain no `>`. */
-export const wireKey = (from: string, to: string) => `${from}>${to}`
+export const wireKey = (from: string, to: string) => `${from}>${to}` as WireKey
 
 const without = <T>(items: Iterable<T>, drop: Set<T>) => [...items].filter(item => !drop.has(item))
 

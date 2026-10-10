@@ -1,5 +1,5 @@
 import type { Graph } from '../../model/graph'
-import type { Edge, State } from '../../model/state'
+import type { Edge, State, WireKey } from '../../model/state'
 import type { Settings } from '../../options'
 import { dataOf } from '../dom'
 import type { View } from '../view'
@@ -61,7 +61,7 @@ export function attach(view: View, graph: Graph, ops: Ops) {
     if (node) return { node }
     const group = dataOf(el, 'group')
     if (group) return { group }
-    const edge = graph.edges.get(dataOf(el, 'wire') ?? '')
+    const edge = graph.edges.get(dataOf(el, 'wire') as WireKey)
     return edge ? { wire: [...edge] } : {}
   }
 
@@ -111,10 +111,11 @@ function press(input: Input, e: PointerEvent) {
   const target = e.target as Element
   const node = dataOf(target, 'node')
   const group = dataOf(target, 'group')
-  const members = group ? graph.members().get(group) ?? [] : []
+  const members = group ? graph.membersOf(group) : []
   // View mode: every drag pans, a click selects a node or a group, or clears the selection.
   if (view.root.dataset.mode !== 'edit') return pan(input, e, () => s.select && view.select(node ? [node] : members))
-  const wire = dataOf(target, 'wire')
+  // Data attributes hold wire keys as plain strings.
+  const wire = dataOf(target, 'wire') as WireKey | undefined
   // Without `connect`, an anchor is just part of its node.
   const anchor = s.connect && dataOf(target, 'anchor')
   if (anchor) {

@@ -4,6 +4,7 @@ import { curve } from '../geometry/svg-path'
 import { layout } from '../layout/columns'
 import { untangle } from '../layout/untangle'
 import { anchorOf, nodeOf, type Graph, type NodeDef } from '../model/graph'
+import type { WireKey } from '../model/state'
 import type { Settings } from '../options'
 import { anchorAt, axis, facing, outward } from './anchors'
 import { anchorDots, arrowDefs, h, svg, swapClass } from './dom'
@@ -29,7 +30,7 @@ export class View {
   /** Nodes being dragged right now; they may overlap others until they are dropped. */
   dragging = new Set<string>()
   /** Selected nodes, or one selected wire by key; never both. Change it with {@link View.select}. */
-  selected: { nodes: Set<string>; wire?: string } = { nodes: new Set() }
+  selected: { nodes: Set<string>; wire?: WireKey } = { nodes: new Set() }
   /** Present while the `minimap` option is on; created and removed by the next frame. */
   mini?: Minimap
   onSelect?: () => void
@@ -72,7 +73,7 @@ export class View {
   private fitting: boolean
   // Nodes the pending fit shows; undefined for all of them.
   private fitIds?: string[]
-  private ghost?: { fixed: string; to: Point; hide?: string }
+  private ghost?: { fixed: string; to: Point; hide?: WireKey }
   private bandRect?: Rect
   private lifted: Element[] = []
   private highlighted: Element[] = []
@@ -198,13 +199,13 @@ export class View {
    * Previews a wire being dragged from a fixed anchor to a world point; no arguments hides it.
    * @param hide - key of an existing wire to hide meanwhile, e.g. one being moved.
    */
-  drag(fixed?: string, to?: Point, hide?: string) {
+  drag(fixed?: string, to?: Point, hide?: WireKey) {
     this.ghost = fixed && to ? { fixed, to, hide } : undefined
     this.update()
   }
 
   /** Selects these nodes, or else the wire with this key; no arguments clear the selection. */
-  select(nodes: Iterable<string> = [], wire?: string) {
+  select(nodes: Iterable<string> = [], wire?: WireKey) {
     const next = new Set(nodes)
     const { nodes: old, wire: was } = this.selected
     if (wire === was && next.size === old.size && [...next].every(id => old.has(id))) return
@@ -220,7 +221,7 @@ export class View {
   }
 
   /** The track of a wire's visible path, once it has been drawn. */
-  track(key: string) {
+  track(key: WireKey) {
     return this.wires.track(key)
   }
 
