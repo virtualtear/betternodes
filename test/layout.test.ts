@@ -36,3 +36,25 @@ test('a chain far longer than the call stack is deep gets one column per node', 
   const columns = columnsOf(ids, ids.slice(1).map((id, i) => [id, ids[i]]))
   expect([columns[0], columns[ids.length - 1]]).toEqual([ids.length - 1, 0])
 })
+
+const positionsOf = (ids: string[], wires: [string, string][]) => {
+  const { graph, sizes } = graphOf(ids, wires)
+  return layout(graph, sizes, 20)
+}
+
+test('rows are reordered when that uncrosses wires between columns', () => {
+  // Inserted c before d, but a feeds d and b feeds c: d moves up, so the wires run side by side.
+  const at = positionsOf(['a', 'b', 'c', 'd'], [['a', 'd'], ['b', 'c']])
+  expect(at.get('a')![1]).toBeLessThan(at.get('b')![1])
+  expect(at.get('d')![1]).toBeLessThan(at.get('c')![1])
+})
+
+test('a layout whose wires do not cross keeps insertion order', () => {
+  // A binary tree, children inserted left to right: already free of crossings.
+  const ids = Array.from({ length: 15 }, (_, i) => `n${i}`)
+  const at = positionsOf(ids, ids.slice(1).map((id, i): [string, string] => [ids[Math.floor(i / 2)], id]))
+  for (const column of Map.groupBy(ids, id => at.get(id)![0]).values()) {
+    const ys = column.map(id => at.get(id)![1])
+    expect(ys).toEqual([...ys].sort((p, q) => p - q))
+  }
+})
