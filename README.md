@@ -29,7 +29,7 @@ edit comes out as JSON.
 ## Installation
 
 ```sh
-npm install --allow-git=root github:virtualtear/betternodes#v0.2.0
+npm install --allow-git=root github:virtualtear/betternodes#v0.3.0
 ```
 
 betternodes is not on npm yet. npm 12 and later need `--allow-git=root`. npm builds the package
