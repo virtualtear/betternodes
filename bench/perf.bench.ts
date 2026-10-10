@@ -241,28 +241,94 @@ test('frames on a 1000-node graph', async () => {
   el.remove()
 })
 
-// Wire notes are placed clear of nodes, which checks node rects for every candidate spot.
-test('frames with 200 labelled wires', async () => {
-  const { el, f } = mount(1000)
-  for (let i = 1; i < 1000; i += 5) if (i % COLS) f.label(`n${i - 1}.e`, `n${i}.w`, `step ${i}`)
+// Where the known limits show first: routing, wire scans and lanes grow with the graph.
+test('first frame: mount 5000 nodes', async () => {
+  let mounted: ReturnType<typeof mount>
+  await measure('frame: mount 5000 nodes + 4843 wires', {
+    budget: 3000,
+    runs: 3,
+    warmup: 1,
+    run: () => {
+      mounted = mount(5000)
+      frameNow(mounted.f)
+    },
+    teardown: () => {
+      mounted.f.destroy()
+      mounted.el.remove()
+    },
+  })
+})
+
+test('frames on a 5000-node graph', async () => {
+  const { el, f } = mount(5000)
   frameNow(f)
   frameNow(f)
   let step = 0
-  const dragged = graphOf(f).nodes.get('n500')!
-  await measure('frame: dragging one node, 200 labelled wires (1000 nodes)', {
-    budget: 8,
-    runs: 60,
+  const dragged = graphOf(f).nodes.get('n2500')!
+  await measure('frame: dragging one node (5000 nodes)', {
+    budget: 16,
+    runs: 30,
     run: () => {
-      view(f).dragging = new Set(['n500'])
-      dragged.x = gridAt(500)[0] + (++step % 10) * 20
-      dragged.y = gridAt(500)[1] + 60
-      view(f).place('n500')
+      view(f).dragging = new Set(['n2500'])
+      dragged.x = gridAt(2500)[0] + (++step % 10) * 20
+      dragged.y = gridAt(2500)[1] + 60
+      view(f).place('n2500')
       frameNow(f)
     },
   })
+  const block = Array.from({ length: 100 }, (_, i) => (60 + Math.floor(i / 10)) * COLS + 10 + (i % 10))
+  view(f).dragging = new Set(block.map(i => `n${i}`))
+  await measure('frame: dragging 100 selected nodes (5000 nodes)', {
+    budget: 32,
+    runs: 30,
+    run: () => {
+      const dx = (++step % 10) * 20
+      for (const i of block) {
+        Object.assign(graphOf(f).nodes.get(`n${i}`)!, { x: gridAt(i)[0] + dx, y: gridAt(i)[1] + 60 })
+        view(f).place(`n${i}`)
+      }
+      frameNow(f)
+    },
+  })
+  view(f).dragging = new Set()
   f.destroy()
   el.remove()
 })
+
+// Wire notes are placed clear of nodes, which checks node rects for every candidate spot. The wires
+// bend (one row down, one column over), so each note has an inner segment to try.
+function labelled(n: number, notes: number) {
+  const mounted = mount(n)
+  for (let k = 0, i = 0; k < notes && i + COLS + 1 < n; i++) {
+    if (i % COLS === COLS - 1) continue
+    mounted.f.connect(`n${i}.e`, `n${i + COLS + 1}.w`, { label: `step ${i}` })
+    k++
+  }
+  return mounted
+}
+
+for (const [n, notes, budget] of [[1000, 200, 8], [5000, 1000, 40]]) {
+  test(`frames with ${notes} labelled bent wires, ${n} nodes`, async () => {
+    const { el, f } = labelled(n, notes)
+    frameNow(f)
+    frameNow(f)
+    let step = 0
+    const dragged = graphOf(f).nodes.get('n500')!
+    await measure(`frame: dragging one node, ${notes} labelled bent wires (${n} nodes)`, {
+      budget,
+      runs: 30,
+      run: () => {
+        view(f).dragging = new Set(['n500'])
+        dragged.x = gridAt(500)[0] + (++step % 10) * 20
+        dragged.y = gridAt(500)[1] + 60
+        view(f).place('n500')
+        frameNow(f)
+      },
+    })
+    f.destroy()
+    el.remove()
+  })
+}
 
 // Group frames are redrawn in the minimap on every frame in which a node moved.
 test('frames with 20 groups and the minimap', async () => {
