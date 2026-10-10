@@ -1,6 +1,6 @@
 import { Buckets } from '../geometry/buckets'
 import { GRID, clamp, fitInto, frameAround, overlap, union, type Point, type Rect } from '../geometry/rect'
-import { reach, route } from '../geometry/route'
+import { reach, route, STUB } from '../geometry/route'
 import { curve } from '../geometry/svg-path'
 import { layout } from '../layout/columns'
 import { untangle } from '../layout/untangle'
@@ -12,14 +12,17 @@ import { anchorDots, arrowDefs, h, svg, swapClass } from './dom'
 import { Groups } from './groups'
 import { Minimap } from './minimap'
 import { Dots } from './packets/dots'
+import { Paints, Sketch } from './sketch'
 import { Wires } from './wires'
 
 // Screen px between a fitted graph and the root's border.
 const FIT_PAD = 40
 // Size assumed for a node that has no element to measure, until any node has been measured.
 const GUESS: Readonly<Point> = [160, 40]
-// Mount area while the root has no size yet: nothing meets it.
-const NOWHERE: Rect = [0, 0, 0, 0]
+// Mount area while the root has no size yet, or while the view is far out: NaN overlaps nothing.
+const NOWHERE: Rect = [NaN, NaN, 0, 0]
+// Below this zoom titles are under 6px tall: nodes and wires are drawn as plain shapes on the GPU.
+const FAR = 0.4
 
 /** Renders a graph into a root element, batching DOM writes into one animation frame. */
 export class View {
@@ -83,6 +86,15 @@ export class View {
     this.update()
   })
   private resized = false
+  // Nodes and wires as shapes for far zoom levels: made the first time the view goes far, then kept
+  // up to date. `repaint` holds nodes whose look changed with the selection.
+  private sketch?: Sketch
+  private paints?: Paints
+  private readonly repaint = new Set<string>()
+  // When the theme was last checked: reading it forces a style recalc, so not every frame. While far
+  // out and idle, a timer brings a frame now and then to look, since CSS can't recolour the shapes.
+  private themed = 0
+  private poll = 0
   // Size of a node without a measurement: the first one measured stands in for the rest.
   private guess = GUESS
   // World area whose nodes have elements, and the zoom it was made for; unset until the root has a size.
@@ -116,8 +128,26 @@ export class View {
     root.append(this.world, this.band)
   }
 
+  /** Whether the view is far out, where nodes and wires are shapes on the GPU instead of elements. */
+  get far() {
+    return this.settings.virtual && this.k < FAR && this.dots.gpu()
+  }
+
+  /** The top node under a client point, found through the index: far out, nodes have no elements. */
+  nodeAt(clientX: number, clientY: number) {
+    const [x, y] = this.toWorld(clientX, clientY)
+    let top: NodeDef | undefined
+    this.index.near([x, y, 0, 0], id => {
+      const n = this.graph.nodes.get(id)
+      if (n && (!top || n.seq > top.seq)) top = n
+    })
+    return top?.id
+  }
+
   /** Removes everything this view added to the root. */
   destroy() {
+    clearTimeout(this.poll)
+    this.paints?.destroy()
     this.dots.destroy()
     this.mini?.destroy()
     this.resize.disconnect()
@@ -142,6 +172,7 @@ export class View {
       this.rects.delete(id)
       this.wires.free(rect)
     }
+    this.sketch?.nodes.delete(id)
     this.shifted.delete(id)
     const el = this.els.get(id)
     if (el) {
@@ -245,6 +276,10 @@ export class View {
     const next = new Set(nodes)
     const { nodes: old, wire: was } = this.selected
     if (wire === was && next.size === old.size && [...next].every(id => old.has(id))) return
+    if (this.sketch) {
+      for (const id of old) if (!next.has(id)) this.repaint.add(id)
+      for (const id of next) if (!old.has(id)) this.repaint.add(id)
+    }
     this.selected = { nodes: next, wire }
     this.update()
     this.onSelect?.()
@@ -332,18 +367,25 @@ export class View {
     }
     this.toggleMinimap()
     this.mini?.render(this.moved, this.panned || fitted)
+    // Read before the wires take the graph's changed wire keys.
+    const edited = this.sketch ? [...this.graph.dirty] : []
     this.wires.render(this.shifted, this.dragging, this.settings.virtual ? this.area ?? NOWHERE : undefined)
+    this.paintSketch(edited, now)
     this.renderOverlays()
     this.dirty.clear()
     this.moved.clear()
     this.stale.clear()
     this.shifted.clear()
+    this.repaint.clear()
     for (const id of late) this.dirty.add(id)
     if (late.length) this.update()
     if (this.panned || fitted) this.onViewport?.()
     this.panned = false
     this.onFrame?.(now)
-    if (this.dots.draw(now, this.x, this.y, this.k, this.width, this.height)) this.update()
+    const far = this.far
+    if (this.dots.draw(now, this.x, this.y, this.k, this.width, this.height, far ? this.sketch : undefined)) this.update()
+    clearTimeout(this.poll)
+    if (far) this.poll = setTimeout(() => this.update(), 500)
   }
 
   private move(n: NodeDef, x: number, y: number) {
@@ -354,11 +396,13 @@ export class View {
   }
 
   // Whether a node should have an element: it meets the mount area, waits for layout (which needs
-  // its size), is being dragged or holds focus. Without the `virtual` option, every node has one.
+  // its size), is being dragged or holds focus. Without the `virtual` option, every node has one;
+  // far out, only nodes waiting for layout or holding focus do, since the GPU draws dragged ones.
   private wanted(id: string) {
     const n = this.graph.nodes.get(id)!
-    if (!this.settings.virtual || !n.placed || this.dragging.has(id)) return true
+    if (!this.settings.virtual || !n.placed) return true
     if (!this.area) return false
+    if (this.dragging.has(id) && this.area !== NOWHERE) return true
     const r = this.rects.get(id) ?? [n.x, n.y, ...this.guess]
     return overlap(r, this.area) || !!this.els.get(id)?.contains(document.activeElement)
   }
@@ -374,6 +418,14 @@ export class View {
       return all
     }
     if (!this.width || !this.height) return []
+    if (this.far) {
+      // Far out: shapes on the GPU instead of elements.
+      if (this.area !== NOWHERE) {
+        this.area = NOWHERE
+        for (const id of [...this.els.keys()]) if (!this.wanted(id)) this.unmount(id)
+      }
+      return []
+    }
     const [w, h] = [this.width / this.k, this.height / this.k]
     const [vx, vy] = [-this.x / this.k, -this.y / this.k]
     const a = this.area
@@ -385,6 +437,51 @@ export class View {
     this.index.near(this.area, id => next.add(id))
     for (const id of [...this.els.keys()]) if (!next.has(id) && !this.wanted(id)) this.unmount(id)
     return [...next].filter(id => !this.els.has(id))
+  }
+
+  // Keeps the shapes of nodes and wires in step with the graph: all of them the first time the view
+  // goes far, then only what changed, so later frames cost what changed. A theme switch repaints
+  // all; it is looked for at most twice a second, in frames where nothing moved.
+  private paintSketch(edited: WireKey[], now: number) {
+    let all = !this.sketch
+    if (all) {
+      if (!this.far) return
+      this.sketch = new Sketch()
+      this.paints = new Paints(this.world, this.svg)
+    }
+    if (this.far && !this.moved.size && now - this.themed > 500) {
+      this.themed = now
+      if (this.paints!.changed()) all = true
+    }
+    if (all) {
+      for (const id of this.graph.nodes.keys()) this.paintNode(id)
+      for (const key of this.graph.edges.keys()) this.paintWire(key)
+      return
+    }
+    for (const id of this.moved) this.paintNode(id)
+    for (const id of this.repaint) this.paintNode(id)
+    const wires = new Set(edited)
+    for (const id of this.shifted.keys()) for (const key of this.graph.wiresAt(id)) wires.add(key)
+    for (const key of wires) this.paintWire(key)
+  }
+
+  private paintNode(id: string) {
+    const n = this.graph.nodes.get(id)
+    if (!n) return this.sketch!.nodes.delete(id)
+    const [fill, border] = this.paints!.node(n.classes ?? [], this.selected.nodes.has(id))
+    this.sketch!.node(id, this.rects.get(id) ?? this.box(id), fill, border)
+  }
+
+  // Far out a wire is the shape routing falls back to: a stub out of each anchor, joined by a Z.
+  private paintWire(key: WireKey) {
+    const edge = this.graph.edges.get(key)
+    if (!edge) return this.sketch!.wires.delete(key)
+    const [a, b] = [this.resolve(edge[0], edge[1]), this.resolve(edge[1], edge[0])]
+    const [pa, pb, da, db] = [this.anchor(a), this.anchor(b), axis(anchorOf(a)), axis(anchorOf(b))]
+    const s: Point = [pa[0] + da[0] * STUB, pa[1] + da[1] * STUB]
+    const t: Point = [pb[0] + db[0] * STUB, pb[1] + db[1] * STUB]
+    const mx = (s[0] + t[0]) / 2
+    this.sketch!.wire(key, [pa, s, [mx, s[1]], [mx, t[1]], t, pb], this.paints!.wire(this.graph.classes.get(key) ?? []))
   }
 
   // Takes a node's element out of the page; its content element stays with the node definition.

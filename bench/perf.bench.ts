@@ -393,10 +393,11 @@ test('frames with 20 groups and the minimap', async () => {
 test('frame rate on a 1000-node graph', async () => {
   const { el, f } = mount(1000)
   await fps('fps: idle (1000 nodes)', { frames: 60, minFps: 30 })
-  // Wiggle a node around its spot, one pointer move per frame.
-  const title = el.querySelector('[data-node="n500"] .bn-title')!
-  const r = title.getBoundingClientRect()
-  const [x, y] = [r.left + r.width / 2, r.top + r.height / 2]
+  // Wiggle a node around its spot, one pointer move per frame. The whole graph is fitted, far
+  // enough out that nodes are shapes on the GPU, so the press goes where n500 is drawn.
+  const { x: vx, y: vy, zoom } = f.viewport()
+  const r = el.getBoundingClientRect()
+  const [x, y] = [r.left + vx + (gridAt(500)[0] + 80) * zoom, r.top + vy + (gridAt(500)[1] + 18) * zoom]
   pointer('pointerdown', { x, y })
   await fps('fps: dragging one node (1000 nodes)', {
     minFps: 30,

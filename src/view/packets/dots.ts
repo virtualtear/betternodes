@@ -1,4 +1,5 @@
-import { Gl } from './gl'
+import { Gl } from '../gl'
+import type { Sketch } from '../sketch'
 import { Looks, packetCircle } from './looks'
 
 /** A packet dot; drawn from its first {@link Dots.move} on. */
@@ -71,15 +72,21 @@ export class Dots {
     } else dot.dropped = performance.now()
   }
 
+  /** Whether WebGL2 works here, starting it if needed; the view draws far zoom levels with it. */
+  gpu() {
+    if (!this.svgOnly && (!this.gl || this.gl.lost)) this.start()
+    return !!this.gl
+  }
+
   /**
-   * Draws this frame's dots for the given pan, zoom and root size.
+   * Draws this frame's dots, and the `sketch` of nodes and wires if given, for the given pan, zoom
+   * and root size.
    * @returns whether dots are still fading out and need another frame.
    */
-  draw(now: number, x: number, y: number, k: number, width: number, height: number) {
-    if (!this.dots.size && !this.stale) return false
-    if (!this.svgOnly && (!this.gl || this.gl.lost)) this.start()
-    const { gl } = this
-    if (!gl) return this.drawSvg()
+  draw(now: number, x: number, y: number, k: number, width: number, height: number, sketch?: Sketch) {
+    if (!this.dots.size && !this.stale && !sketch) return false
+    if (!this.gpu()) return this.drawSvg()
+    const gl = this.gl!
     gl.begin(this.dots.size)
     this.looks.next()
     let fading = false
@@ -92,8 +99,9 @@ export class Dots {
       if (dot.shown) gl.push(dot.x, dot.y, this.looks.get(dot.className), fade)
       fading ||= dot.dropped !== undefined
     }
-    gl.draw(x, y, k, width, height)
-    this.stale = this.dots.size > 0
+    gl.draw(x, y, k, width, height, sketch)
+    // A sketch drawn now needs clearing once the view leaves far zoom levels.
+    this.stale = this.dots.size > 0 || !!sketch
     if (!this.stale) {
       clearTimeout(this.idle)
       this.idle = setTimeout(() => this.release(), IDLE)

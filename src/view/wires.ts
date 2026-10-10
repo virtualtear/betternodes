@@ -170,11 +170,13 @@ export class Wires {
     // Mount and unmount: the wires the area now holds, or the changed ones when it stayed put.
     const fresh = new Set<WireKey>()
     let consider: Iterable<WireKey> = check
-    if (panned && area) {
+    // An empty area, as far out, holds no wires: no lookup needed.
+    if (panned && area && area[2] > 0) {
       const hits = new Set([...this.groups.keys(), ...check])
       this.reaches.near(area, key => hits.add(key))
       consider = hits
-    } else if (panned) consider = this.graph.edges.keys() // culling just turned off
+    } else if (panned && area) consider = this.groups.keys()
+    else if (panned) consider = this.graph.edges.keys() // culling just turned off
     for (const key of consider) {
       const want = this.graph.edges.has(key) && (!area || this.held.has(key) || overlap(this.spans.get(key)!, area))
       if (want && !this.groups.has(key)) {

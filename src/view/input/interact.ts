@@ -57,8 +57,9 @@ export function attach(view: View, graph: Graph, ops: Ops) {
   const { signal } = life
   const input: Input = { view, graph, s: view.settings, ops, signal }
 
-  const hitAt = (el: Element): Hit => {
-    const node = dataOf(el, 'node')
+  const hitAt = (e: MouseEvent): Hit => {
+    const el = e.target as Element
+    const node = nodeAt(view, e)
     if (node) return { node }
     const group = dataOf(el, 'group')
     if (group) return { group }
@@ -72,7 +73,7 @@ export function attach(view: View, graph: Graph, ops: Ops) {
     if (view.mini?.el.contains(e.target as Node)) return input.s.pan && steer(input, e)
     press(input, e)
     // Registered after the press's own gesture, so a click sees the selection it made.
-    const hit = hitAt(e.target as Element)
+    const hit = hitAt(e)
     gesture(() => {}, up => isClick(e, up) && ops.emit('click', hit, up), signal)
   }
 
@@ -84,7 +85,7 @@ export function attach(view: View, graph: Graph, ops: Ops) {
     view.zoomAt(e.clientX - r.left, e.clientY - r.top, view.k * Math.exp(-e.deltaY / 500))
   }
 
-  const native = (e: MouseEvent) => ops.emit(e.type as 'dblclick' | 'contextmenu', hitAt(e.target as Element), e)
+  const native = (e: MouseEvent) => ops.emit(e.type as 'dblclick' | 'contextmenu', hitAt(e), e)
 
   // pointerover fires per element entered, so only changes of what it hit are reported.
   let hovered = '{}'
@@ -99,18 +100,23 @@ export function attach(view: View, graph: Graph, ops: Ops) {
   root.addEventListener('pointerdown', down, { signal })
   root.addEventListener('dblclick', native, { signal })
   root.addEventListener('contextmenu', native, { signal })
-  root.addEventListener('pointerover', e => over(hitAt(e.target as Element)), { signal })
+  root.addEventListener('pointerover', e => over(hitAt(e)), { signal })
+  // Far out, nodes have no elements to enter, so moves over the drawn shapes count instead.
+  root.addEventListener('pointermove', e => view.far && over(hitAt(e)), { signal })
   root.addEventListener('pointerleave', () => over({}), { signal })
   root.addEventListener('wheel', wheel, { passive: false, signal })
   root.addEventListener('keydown', e => onKey(input, e), { signal })
   return () => life.abort()
 }
 
+// The node an event landed on: its element, or far out, where nodes have none, the drawn shape.
+const nodeAt = (view: View, e: MouseEvent) => dataOf(e.target as Element, 'node') ?? (view.far ? view.nodeAt(e.clientX, e.clientY) : undefined)
+
 // Starts what a left press does, by mode, options and what it landed on.
 function press(input: Input, e: PointerEvent) {
   const { view, graph, s } = input
   const target = e.target as Element
-  const node = dataOf(target, 'node')
+  const node = nodeAt(view, e)
   const group = dataOf(target, 'group')
   const members = group ? graph.membersOf(group) : []
   // View mode: every drag pans, a click selects a node or a group, or clears the selection.

@@ -217,7 +217,8 @@ test('edit mode: connection points hide when zoomed out below 50%', async () => 
   const el = container()
   const f = flow(el).mode('edit')
   f.node('a').at(0, 0)
-  f.node('b').at(4000, 3000) // fit has to zoom far out to show both
+  // Still above the zoom where nodes become shapes without elements.
+  f.viewport({ zoom: 0.45 })
   await frame()
   expect(anchor(el, 'a.e')).not.toBeVisible()
 })

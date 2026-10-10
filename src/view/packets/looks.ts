@@ -10,6 +10,18 @@ export interface Look {
 
 const CLEAR = [0, 0, 0, 0]
 
+let paint: OffscreenCanvasRenderingContext2D | undefined
+
+/** Any CSS colour as RGBA bytes, by painting one pixel with it; `none` and paint servers come out clear. */
+export function rgba(colour: string) {
+  const g = (paint ??= new OffscreenCanvas(1, 1).getContext('2d', { willReadFrequently: true })!)
+  g.clearRect(0, 0, 1, 1)
+  g.fillStyle = '#0000'
+  g.fillStyle = colour
+  g.fillRect(0, 0, 1, 1)
+  return g.getImageData(0, 0, 1, 1).data
+}
+
 /** An SVG packet circle with the extra class `className`. */
 export function packetCircle(className: string) {
   const el = svg('circle', 'bn-packet')
@@ -27,7 +39,6 @@ export class Looks {
   // Parsed looks by computed style, and this frame's looks by class.
   private readonly parsed = new Map<string, Look>()
   private readonly current = new Map<string, Look>()
-  private paint?: OffscreenCanvasRenderingContext2D
 
   constructor(private readonly layer: SVGGElement) {}
 
@@ -59,19 +70,9 @@ export class Looks {
     let look = this.parsed.get(key)
     if (!look) {
       const width = parseFloat(s.strokeWidth) || 0
-      look = { fill: this.rgba(s.fill), stroke: width ? this.rgba(s.stroke) : CLEAR, r: parseFloat(s.r) || 0, width }
+      look = { fill: rgba(s.fill), stroke: width ? rgba(s.stroke) : CLEAR, r: parseFloat(s.r) || 0, width }
       this.parsed.set(key, look)
     }
     return look
-  }
-
-  // Any CSS colour as RGBA bytes, by painting one pixel with it; `none` and paint servers come out clear.
-  private rgba(colour: string) {
-    const g = (this.paint ??= new OffscreenCanvas(1, 1).getContext('2d', { willReadFrequently: true })!)
-    g.clearRect(0, 0, 1, 1)
-    g.fillStyle = '#0000'
-    g.fillStyle = colour
-    g.fillRect(0, 0, 1, 1)
-    return g.getImageData(0, 0, 1, 1).data
   }
 }

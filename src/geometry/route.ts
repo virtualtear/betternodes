@@ -1,8 +1,8 @@
 import { Heap } from './heap'
 import { bounds, inflate, overlap, type Point, type Rect } from './rect'
 
-// Wires step this far straight out of a node before turning (less when another node is close).
-const STUB = 20
+/** How far wires step straight out of a node before turning (less when another node is close). */
+export const STUB = 20
 /** Free space kept around every node where there is room for it, in world px. */
 export const CLEAR = 10
 // Obstacles further than this from the wire's bounding box are ignored.
