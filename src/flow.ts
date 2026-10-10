@@ -1,8 +1,9 @@
 import { GroupBuilder, NodeBuilder } from './builders'
 import { checkClasses, fail } from './check'
+import type { Point } from './geometry/rect'
 import { Graph } from './model/graph'
-import { History } from './model/history'
-import { diff, wireKey, type State } from './model/state'
+import { History, Journal, type Step } from './model/history'
+import { wireKey, type Diff, type State } from './model/state'
 import { settle, type FlowOptions, type Settings } from './options'
 import type { End, FlowEvents, Selection, Viewport } from './types'
 import { attach, type Emitted } from './view/input/interact'
@@ -18,7 +19,7 @@ export class Flow {
   private readonly events = new EventTarget()
   private readonly view: View
   private readonly packets: Packets
-  private readonly history: History<State>
+  private readonly history: History
   // Shared by reference with the view and the input handlers, so set() takes effect on their next event.
   private readonly settings: Settings
   private readonly detach: () => void
@@ -35,7 +36,7 @@ export class Flow {
     this.view.onSelect = () => this.fire('select', this.selection())
     this.view.onViewport = () => this.fire('viewport', this.viewport())
     this.detach = attach(this.view, this.graph, {
-      changed: before => this.commit(before),
+      changed: journal => this.commit(journal),
       undo: () => this.undo(),
       redo: () => this.redo(),
       emit: (...event) => this.fire(...event),
@@ -196,8 +197,9 @@ export class Flow {
 
   /**
    * Reverts the last user edit and emits `change`.
-   * @remarks Restores the state from just before that edit, so code changes made since then are
-   * reverted too. History keeps the last 100 edits unless the `history` option says otherwise.
+   * @remarks Only that edit is undone: changes your code made since stay. Parts that no longer
+   * apply, such as a wire to a node removed since, are skipped, and wires it brings back go to the
+   * end of `state().edges`. History keeps the last 100 edits unless the `history` option says otherwise.
    */
   undo() {
     return this.travel('undo')
@@ -324,25 +326,55 @@ export class Flow {
   }
 
   private travel(direction: 'undo' | 'redo') {
-    const now = this.state()
-    const target = this.history[direction](now)
-    if (!target) return this
-    // Cleared first, so load() dropping selected nodes doesn't shrink the selection one event at a time.
+    const step = this.history[direction]()
+    if (!step) return this
+    // Cleared first, so dropping selected nodes doesn't shrink the selection one event at a time.
     this.view.select()
-    this.load(target)
-    this.emit(now)
+    const journal = new Journal()
+    if (direction === 'undo') this.revert(step, journal)
+    else this.replay(step, journal)
+    this.emit(journal.close(this.graph).diff)
     return this
   }
 
-  private commit(before: State) {
-    this.history.push(before)
-    this.emit(before)
+  // Applies a step backwards. Undone deletes come first, so wires to those nodes can return.
+  private revert({ diff, was }: Step, journal: Journal) {
+    for (const id of this.graph.restore(diff.nodesRemoved, journal)) this.view.mark(id)
+    for (const [from, to] of diff.removed) if (this.graph.canConnect(from, to)) this.graph.connect(from, to, journal)
+    for (const [from, to] of diff.added) this.graph.disconnect(from, to, journal)
+    this.moveTo(was, journal)
   }
 
-  private emit(before: State) {
+  private replay({ diff }: Step, journal: Journal) {
+    this.moveTo(Object.entries(diff.moved), journal)
+    for (const id of this.graph.remove(diff.nodesRemoved, journal)) this.view.drop(id)
+    for (const [from, to] of diff.removed) this.graph.disconnect(from, to, journal)
+    for (const [from, to] of diff.added) if (this.graph.canConnect(from, to)) this.graph.connect(from, to, journal)
+  }
+
+  // Nodes deleted since the edit are skipped.
+  private moveTo(positions: Iterable<[string, Point]>, journal: Journal) {
+    for (const [id, [x, y]] of positions) {
+      const n = this.graph.nodes.get(id)
+      if (!n) continue
+      journal.track([n])
+      Object.assign(n, { x, y, placed: true })
+      this.view.place(id)
+    }
+  }
+
+  private commit(journal: Journal) {
+    const step = journal.close(this.graph)
+    const { added, removed, nodesRemoved, nodesRestored } = step.diff
+    // Nothing changed, e.g. a drag that ended where it started.
+    if (!step.was.size && !added.length && !removed.length && !nodesRemoved.length && !nodesRestored.length) return
+    this.history.push(step)
+    this.emit(step.diff)
+  }
+
+  private emit(diff: Diff) {
     this.view.update()
-    const state = this.state()
-    this.fire('change', state, diff(before, state))
+    this.fire('change', diff)
   }
 
   private fire(...[type, ...args]: Emitted<FlowEvents>) {

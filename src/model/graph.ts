@@ -1,4 +1,5 @@
 import { WORLD } from '../geometry/rect'
+import type { Journal } from './history'
 import { wireKey, type Edge, type State, type WireKey } from './state'
 
 /** A node as defined in code; x/y are world coordinates. */
@@ -102,19 +103,31 @@ export class Graph {
     return this.has(from) && this.has(to) && nodeOf(from) !== nodeOf(to) && !this.edges.has(wireKey(from, to))
   }
 
-  /** @throws if {@link Graph.canConnect} rejects the wire. */
-  connect(from: string, to: string) {
+  /**
+   * Adds a wire, recording it in `journal` if given.
+   * @throws if {@link Graph.canConnect} rejects the wire.
+   */
+  connect(from: string, to: string, journal?: Journal) {
     if (!this.canConnect(from, to)) throw new Error(`betternodes: invalid wire ${from} -> ${to}`)
     const key = wireKey(from, to)
-    this.edges.set(key, [from, to])
+    const edge: Edge = [from, to]
+    this.edges.set(key, edge)
     this.link(nodeOf(from), key)
     this.link(nodeOf(to), key)
+    journal?.connected(key, edge)
     this.version++
   }
 
-  /** @returns false if there was no such wire. */
-  disconnect(from: string, to: string) {
-    if (!this.unlink(wireKey(from, to))) return false
+  /**
+   * Deletes a wire, recording it in `journal` if given.
+   * @returns false if there was no such wire.
+   */
+  disconnect(from: string, to: string, journal?: Journal) {
+    const key = wireKey(from, to)
+    const edge = this.edges.get(key)
+    if (!edge) return false
+    this.unlink(key)
+    journal?.disconnected(key, edge)
     // Only real changes: a bump makes the next frame re-check every wire.
     this.version++
     return true
@@ -139,11 +152,7 @@ export class Graph {
 
     this.version++
     this.remove(removed)
-    for (const [id, n] of this.trash) {
-      if (removed.has(id)) continue
-      this.trash.delete(id)
-      this.nodes.set(id, n)
-    }
+    this.restore([...this.trash.keys()].filter(id => !removed.has(id)))
     for (const [id, [x, y]] of positions) {
       const n = this.nodes.get(id)
       if (n) Object.assign(n, { x, y, placed: true })
@@ -158,10 +167,10 @@ export class Graph {
   }
 
   /**
-   * Moves nodes to the trash and deletes their wires.
+   * Moves nodes to the trash and deletes their wires, recording both in `journal` if given.
    * @returns the ids that were nodes; unknown ones are skipped.
    */
-  remove(ids: Iterable<string>) {
+  remove(ids: Iterable<string>, journal?: Journal) {
     const gone = new Set<string>()
     for (const id of ids) {
       const n = this.nodes.get(id)
@@ -169,6 +178,7 @@ export class Graph {
       this.nodes.delete(id)
       this.trash.set(id, n)
       gone.add(id)
+      journal?.deleted(id)
     }
     // Only far ends that stay need their sets updated: a removed node's whole set goes.
     for (const id of gone) {
@@ -176,6 +186,7 @@ export class Graph {
         const edge = this.edges.get(key)
         if (!edge) continue // deleted from its other end already
         this.edges.delete(key)
+        journal?.disconnected(key, edge)
         const far = nodeOf(edge[0]) === id ? nodeOf(edge[1]) : nodeOf(edge[0])
         if (!gone.has(far)) this.at.get(far)?.delete(key)
       }
@@ -183,6 +194,24 @@ export class Graph {
     }
     if (gone.size) this.version++
     return gone
+  }
+
+  /**
+   * Brings deleted nodes back from the trash, without their wires; records them in `journal` if given.
+   * @returns the ids that were in the trash.
+   */
+  restore(ids: Iterable<string>, journal?: Journal) {
+    const back = new Set<string>()
+    for (const id of ids) {
+      const n = this.trash.get(id)
+      if (!n) continue
+      this.trash.delete(id)
+      this.nodes.set(id, n)
+      back.add(id)
+      journal?.restored(id)
+    }
+    if (back.size) this.version++
+    return back
   }
 
   /** Sets the note on a wire; no text removes it. */

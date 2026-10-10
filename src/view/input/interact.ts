@@ -1,5 +1,6 @@
 import type { Graph } from '../../model/graph'
-import type { Edge, State, WireKey } from '../../model/state'
+import type { Journal } from '../../model/history'
+import type { Edge, WireKey } from '../../model/state'
 import type { Settings } from '../../options'
 import { dataOf } from '../dom'
 import type { View } from '../view'
@@ -32,8 +33,8 @@ export type Emitted<E extends { [K in keyof E]: unknown[] }> = { [K in keyof E]:
 
 /** Callbacks from user input back to the Flow. */
 export interface Ops {
-  /** A user edit happened; `before` is the state from just before it. */
-  changed(before: State): void
+  /** A user edit happened, recorded in `journal`. */
+  changed(journal: Journal): void
   undo(): void
   redo(): void
   emit(...event: Emitted<InputEvents>): void

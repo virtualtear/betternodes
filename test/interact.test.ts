@@ -12,7 +12,8 @@ async function setup(mode: 'view' | 'edit') {
   f.node('b').title('B').at(320, 20)
   f.node('c').title('C').at(320, 220)
   const changes = vi.fn()
-  f.on('change', changes)
+  // Listeners get only the diff; the state is read the way an app would.
+  f.on('change', diff => changes(f.state(), diff))
   await frame()
   return { el, f, changes }
 }
@@ -227,7 +228,8 @@ test('edit mode: a new wire does not re-arrange auto-laid-out nodes, so saved po
   for (const id of ['hook', 'if', 'mail', 'log']) f.node(id)
   f.connect('hook', 'if').connect('if', 'mail').connect('if', 'log')
   const changes = vi.fn()
-  f.on('change', changes)
+  // Listeners get only the diff; the state is read the way an app would.
+  f.on('change', diff => changes(f.state(), diff))
   await frame()
   await drag(anchor(el, 'mail.e'), anchor(el, 'log.e')) // log now depends on mail
   await frame()

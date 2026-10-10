@@ -329,7 +329,8 @@ test('fit() brings the graph back into view after panning away', async () => {
 test('undo() and redo() with no history do nothing', () => {
   const f = twoNodes()
   const changes = vi.fn()
-  f.on('change', changes)
+  // Listeners get only the diff; the state is read the way an app would.
+  f.on('change', diff => changes(f.state(), diff))
   f.undo().redo()
   expect([f.state().edges, changes.mock.calls.length]).toEqual([[['a.e', 'b.w']], 0])
 })

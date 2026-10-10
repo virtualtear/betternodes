@@ -1,4 +1,5 @@
 import { GRID, type Point } from '../../geometry/rect'
+import { Journal } from '../../model/history'
 import { land } from './drags'
 import type { Input } from './interact'
 
@@ -31,12 +32,12 @@ export function onKey(input: Input, e: KeyboardEvent) {
 // Moves the selected nodes one grid step (1px without snapping) as one edit.
 function nudge(input: Input, [dx, dy]: Point) {
   const { view, graph, s } = input
-  const before = graph.toState()
   const step = s.snap ? GRID : 1
   const nodes = [...view.selected.nodes].map(id => graph.nodes.get(id)!)
-  const starts = nodes.map(n => [n.x, n.y])
+  const journal = new Journal()
+  journal.track(nodes)
   for (const n of nodes) Object.assign(n, { x: n.x + dx * step, y: n.y + dy * step, placed: true })
-  land(input, nodes, starts, before)
+  land(input, nodes, journal)
 }
 
 // Deletes the selected wire or nodes as one edit; returns whether anything was selected.
@@ -44,11 +45,11 @@ function removeSelected({ view, graph, ops }: Input) {
   const { nodes, wire } = view.selected
   const edge = wire && graph.edges.get(wire)
   if (!edge && !nodes.size) return false
-  const before = graph.toState()
+  const journal = new Journal()
   // Cleared first, so drop() doesn't shrink the selection one node (and event) at a time.
   view.select()
-  if (edge) graph.disconnect(...edge)
-  for (const id of graph.remove(nodes)) view.drop(id)
-  ops.changed(before)
+  if (edge) graph.disconnect(...edge, journal)
+  for (const id of graph.remove(nodes, journal)) view.drop(id)
+  ops.changed(journal)
   return true
 }

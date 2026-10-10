@@ -47,7 +47,7 @@ f.node('mail').title('Send mail')
 f.connect('hook', 'mail', { label: 'new order' })
 
 f.mode('edit')
-f.on('change', state => localStorage.setItem('graph', JSON.stringify(state)))
+f.on('change', () => localStorage.setItem('graph', JSON.stringify(f.state())))
 ```
 
 Nodes without a position are laid out automatically, and the first render fits the graph into view.
@@ -93,10 +93,10 @@ type State = {
 
 ```ts
 f.load(JSON.parse(localStorage.getItem('graph') ?? 'null'))
-f.on('change', state => localStorage.setItem('graph', JSON.stringify(state)))
+f.on('change', () => localStorage.setItem('graph', JSON.stringify(f.state())))
 
 // or send only what changed
-f.on('change', (_, diff) => api.patch('/graph', diff))
+f.on('change', diff => api.patch('/graph', diff))
 ```
 
 `load()` drops invalid entries with a warning. A state with the wrong shape changes nothing.
@@ -220,7 +220,7 @@ Both return a promise with the ids of the nodes reached.
 | Method | Description |
 | --- | --- |
 | `f.state()` / `f.load(state)` | Save or restore positions and wires |
-| `f.undo()` / `f.redo()` | Undo or redo a user edit |
+| `f.undo()` / `f.redo()` | Undo or redo a user edit; changes your code made since stay |
 | `f.layout()` | Re-run auto-layout |
 | `f.fit(...ids)` | Fit these nodes, or all, into view |
 | `f.viewport()` / `f.viewport({ x?, y?, zoom? })` | Read or set pan and zoom |
@@ -233,12 +233,12 @@ Both return a promise with the ids of the nodes reached.
 
 ```ts
 f.on('click', ({ node }) => console.log(node))
-f.on('change', (state, diff) => save(state), { signal })
+f.on('change', () => save(f.state()), { signal })
 ```
 
 | Event | Arguments | When |
 | --- | --- | --- |
-| `change` | `(state, diff)` | After every user edit, including undo and redo; never for calls from code |
+| `change` | `(diff)` | After every user edit, including undo and redo; never for calls from code. Call `f.state()` for the whole state |
 | `select` | `({ nodes, wire? })` | The selection changed |
 | `viewport` | `({ x, y, zoom })` | Pan or zoom changed |
 | `click`, `dblclick`, `contextmenu` | `(hit, event)` | Pointer events |

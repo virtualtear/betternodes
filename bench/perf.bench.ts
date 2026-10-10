@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { Graph, type NodeDef } from '../src/model/graph'
-import type { State } from '../src/model/state'
+import { Journal } from '../src/model/history'
 import { flow, type Flow } from '../src/index'
 import { layout } from '../src/layout/columns'
 import { untangle } from '../src/layout/untangle'
@@ -26,7 +26,7 @@ const gridRects = (n: number) => Array.from({ length: n }, (_, i): Rect => [...g
 interface Internals {
   view: { flush(now: number): void; viewport(x: number, y: number, k: number): void; place(id: string): void; dragging: Set<string>; x: number }
   graph: Graph
-  commit(before: State): void
+  commit(journal: Journal): void
 }
 const view = (f: Flow) => (f as unknown as Internals).view
 const graphOf = (f: Flow) => (f as unknown as Internals).graph
@@ -215,11 +215,13 @@ test('frames on a 1000-node graph', async () => {
     budget: 10,
     runs: 30,
     setup: () => {
-      const before = f.state()
-      graphOf(f).nodes.get('n500')!.x += 40
+      const journal = new Journal()
+      const node = graphOf(f).nodes.get('n500')!
+      journal.track([node])
+      node.x += 40
       view(f).place('n500')
       frameNow(f)
-      internals.commit(before)
+      internals.commit(journal)
     },
     run: () => {
       f.undo()

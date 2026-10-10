@@ -1,5 +1,5 @@
 import type { Anchor } from './model/graph'
-import type { Diff, Edge, State } from './model/state'
+import type { Diff, Edge } from './model/state'
 import type { InputEvents } from './view/input/interact'
 
 /**
@@ -24,8 +24,12 @@ export interface Selection {
 
 /** Listener arguments of every event `Flow.on()` subscribes to, by event type. */
 export interface FlowEvents extends InputEvents {
-  /** A user edit in edit mode, with the full new state and what the edit changed; code never fires it. */
-  change: [state: State, diff: Diff]
+  /**
+   * A user edit in edit mode, with what it changed; code never fires it.
+   * @remarks Call `state()` in the listener for the whole state; building it costs time in
+   * proportion to the graph, so it isn't passed along.
+   */
+  change: [diff: Diff]
   /**
    * The selection changed, whether the user or code changed it, in both modes.
    * @remarks Never fires when the selection stayed the same, so calling `select()` from a listener is safe.

@@ -1,7 +1,8 @@
 import { GRID, bounds, overlap, snap, type Rect } from '../../geometry/rect'
 import { freeSpots } from '../../layout/untangle'
 import type { NodeDef } from '../../model/graph'
-import { wireKey, type Edge, type State, type WireKey } from '../../model/state'
+import { Journal } from '../../model/history'
+import { wireKey, type Edge, type WireKey } from '../../model/state'
 import { dataOf } from '../dom'
 import { gesture, isClick } from './gesture'
 import type { Input } from './interact'
@@ -23,24 +24,24 @@ function endAt(root: HTMLElement, e: PointerEvent) {
 export function dragWire(input: Input, fixed: string, make: (dropped: string) => Edge, lifted?: Edge) {
   const { view, graph, s, ops, signal } = input
   const hide = lifted && wireKey(...lifted)
-  const before = graph.toState()
   gesture(e => view.drag(fixed, view.toWorld(e.clientX, e.clientY), hide), e => {
     view.drag()
     const dropped = e.type === 'pointerup' ? endAt(view.root, e) : undefined
     if (!dropped) return
     const [from, to] = make(dropped)
     if (!graph.canConnect(from, to) || !s.canConnect(from, to)) return
+    const journal = new Journal()
     if (lifted && hide) {
-      graph.disconnect(...lifted)
+      graph.disconnect(...lifted, journal)
       // The moved wire takes its note and classes along. The old key keeps them too, so undo restores both.
       const note = graph.labels.get(hide)
       if (note) graph.label(from, to, note)
       const classes = graph.classes.get(hide)
       if (classes) graph.classify(from, to, classes)
     }
-    graph.connect(from, to)
+    graph.connect(from, to, journal)
     if (s.select) view.select([], wireKey(from, to))
-    ops.changed(before)
+    ops.changed(journal)
   }, signal, edgeView(input))
 }
 
@@ -70,7 +71,8 @@ export function dragNodes(input: Input, press: PointerEvent, grabbed: string, gr
   const { x: gx, y: gy } = graph.nodes.get(grabbed)!
   // Offsets come from world points, so zooming or edge panning mid-drag keeps nodes under the pointer.
   const [px, py] = view.toWorld(press.clientX, press.clientY)
-  const before = graph.toState()
+  const journal = new Journal()
+  journal.track(nodes)
   view.dragging = group
   const shift = (dx: number, dy: number) => nodes.forEach((n, i) => {
     Object.assign(n, { x: starts[i][0] + dx, y: starts[i][1] + dy, placed: true })
@@ -85,7 +87,7 @@ export function dragNodes(input: Input, press: PointerEvent, grabbed: string, gr
   }, e => {
     view.dragging = new Set()
     if (s.snap) shift(snap(gx + dx) - gx, snap(gy + dy) - gy)
-    land(input, nodes, starts, before)
+    land(input, nodes, journal)
     // A click on one node of a group selects just that node.
     if (s.select && isClick(press, e)) view.select([grabbed])
   }, signal, edgeView(input))
@@ -93,11 +95,11 @@ export function dragNodes(input: Input, press: PointerEvent, grabbed: string, gr
 
 /**
  * Settles moved `nodes` at the nearest free spot, so nodes never stay on top of each other, and
- * reports an edit if any node ended up off its `starts`.
+ * reports the edit `journal` tracks them in.
  * @remarks A group moved as a whole settles as one block, its frame; frames of groups that kept
  * still count as taken.
  */
-export function land({ view, graph, ops }: Input, nodes: NodeDef[], starts: number[][], before: State) {
+export function land({ view, graph, ops }: Input, nodes: NodeDef[], journal: Journal) {
   const moved = new Set(nodes.map(n => n.id))
   const [members, frames] = [graph.members(), view.frames()]
   const units: { ids: string[]; rect: Rect }[] = []
@@ -119,7 +121,7 @@ export function land({ view, graph, ops }: Input, nodes: NodeDef[], starts: numb
       view.place(id)
     }
   })
-  if (nodes.some((n, i) => n.x !== starts[i][0] || n.y !== starts[i][1])) ops.changed(before)
+  ops.changed(journal)
 }
 
 /** Draws a selection box; on release, adds every node it touches to the selection. */

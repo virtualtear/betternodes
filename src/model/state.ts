@@ -28,24 +28,3 @@ export type WireKey = string & { readonly [wire]: true }
 
 /** Map key of the wire from `from` to `to`; unique because node ids contain no `>`. */
 export const wireKey = (from: string, to: string) => `${from}>${to}` as WireKey
-
-const without = <T>(items: Iterable<T>, drop: Set<T>) => [...items].filter(item => !drop.has(item))
-
-/** Compares two states: wires by key, positions by value. */
-export function diff(before: State, after: State): Diff {
-  const keys = (s: State) => new Set(s.edges.map(e => wireKey(...e)))
-  const [had, has] = [keys(before), keys(after)]
-  const moved: Diff['moved'] = {}
-  for (const [id, [x, y]] of Object.entries(after.positions)) {
-    const old = before.positions[id]
-    if (!old || old[0] !== x || old[1] !== y) moved[id] = [x, y]
-  }
-  const [wasGone, isGone] = [new Set(before.removed), new Set(after.removed)]
-  return {
-    added: after.edges.filter(e => !had.has(wireKey(...e))),
-    removed: before.edges.filter(e => !has.has(wireKey(...e))),
-    moved,
-    nodesRemoved: without(isGone, wasGone),
-    nodesRestored: without(wasGone, isGone),
-  }
-}

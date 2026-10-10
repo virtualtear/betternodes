@@ -204,14 +204,14 @@
     }
 
     f.load(JSON.parse(localStorage.getItem(key) ?? 'null'))
-    f.on('change', state => localStorage.setItem(key, JSON.stringify(state)))
+    f.on('change', () => localStorage.setItem(key, JSON.stringify(f.state())))
     const selection = document.getElementById('selection')
     f.on('select', ({ nodes, wire }) => {
       selection.textContent = wire ? `wire ${wire.join(' → ')}` : nodes.length ? `${nodes.length} selected` : ''
     })
     // Empty diff fields are left out, so each line shows only what the edit did.
     const compact = diff => Object.fromEntries(Object.entries(diff).filter(([, v]) => Object.keys(v).length))
-    f.on('change', (_, diff) => write('change', JSON.stringify(compact(diff))))
+    f.on('change', diff => write('change', JSON.stringify(compact(diff))))
     f.on('select', selection => write('select', JSON.stringify(selection)))
     for (const type of ['click', 'dblclick']) f.on(type, hit => write(type, JSON.stringify(hit)))
 

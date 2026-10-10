@@ -15,7 +15,8 @@ async function setup(options: FlowOptions = {}) {
   f.node('c').title('C').at(320, 220)
   f.connect('a.e', 'b.w')
   const changes = vi.fn()
-  f.on('change', changes)
+  // Listeners get only the diff; the state is read the way an app would.
+  f.on('change', diff => changes(f.state(), diff))
   await frame()
   return { el, f, changes }
 }

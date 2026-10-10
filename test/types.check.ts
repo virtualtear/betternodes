@@ -30,7 +30,9 @@ g.set({ mode: 'locked' })
 
 g.on('click', (hit, e) => [hit.node, hit.wire?.[0], e.clientX])
 g.on('hover', hit => hit.node)
-g.on('change', (state, diff) => [state.positions, diff.added])
+g.on('change', diff => [diff.added, diff.moved])
+// @ts-expect-error change listeners get only the diff
+g.on('change', (state: unknown, diff: unknown) => [state, diff])
 g.on('select', ({ nodes, wire }) => [nodes.length, wire?.[1]])
 // @ts-expect-error select listeners get a Selection
 g.on('select', (selection: string) => selection)
