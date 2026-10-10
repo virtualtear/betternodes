@@ -101,13 +101,13 @@ export function dragNodes(input: Input, press: PointerEvent, grabbed: string, gr
  */
 export function land({ view, graph, ops }: Input, nodes: NodeDef[], journal: Journal) {
   const moved = new Set(nodes.map(n => n.id))
-  const [members, frames] = [graph.members(), view.frames()]
   const units: { ids: string[]; rect: Rect }[] = []
   const still: Rect[] = []
-  for (const [g, ids] of members) {
+  for (const [g, ids] of graph.members()) {
     const count = ids.filter(id => moved.has(id)).length
-    if (count === ids.length) units.push({ ids, rect: frames.get(g)! })
-    else if (!count) still.push(frames.get(g)!)
+    // Moved frames from where their members are now: the last frame may predate the drop's snap.
+    if (count === ids.length) units.push({ ids, rect: view.frameOf(g)! })
+    else if (!count) still.push(view.frames().get(g)!)
   }
   const whole = new Set(units.flatMap(u => u.ids))
   for (const id of moved) if (!whole.has(id)) units.push({ ids: [id], rect: view.box(id) })

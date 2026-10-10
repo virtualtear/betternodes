@@ -154,6 +154,18 @@ export class Paints {
     return colours
   }
 
+  /** Fill and stroke of an element with these classes, e.g. `bn-mini-node error`, and its stroke width. */
+  look(className: string): [fill: Colour, stroke: Colour, width: number] {
+    const key = `look:${className}`
+    let colours = this.colours.get(key)
+    if (!colours) {
+      const s = getComputedStyle(this.probe(key, () => h('div', className), this.nodes))
+      colours = [rgba(s.fill), rgba(s.stroke), new Uint8ClampedArray([parseFloat(s.strokeWidth) || 0])]
+      this.colours.set(key, colours)
+    }
+    return [colours[0], colours[1], colours[2][0]]
+  }
+
   /** Stroke of a wire with these extra classes. */
   wire(classes: readonly string[]): Colour {
     const key = `wire:${classes.join(' ')}`

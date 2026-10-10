@@ -92,9 +92,14 @@ export class View {
   private paints?: Paints
   private readonly repaint = new Set<string>()
   // When the theme was last checked: reading it forces a style recalc, so not every frame. While far
-  // out and idle, a timer brings a frame now and then to look, since CSS can't recolour the shapes.
+  // out or with the minimap on, a timer brings a frame now and then to look, since CSS can't recolour
+  // what canvases drew.
   private themed = 0
   private poll = 0
+  // Rects of nodes deleted since the last frame, for the minimap to clear.
+  private gone: Rect[] = []
+  // Each group's frame, kept between frames and made again only for groups whose members moved.
+  private readonly framed = new Map<string, Rect>()
   // Size of a node without a measurement: the first one measured stands in for the rest.
   private guess = GUESS
   // World area whose nodes have elements, and the zoom it was made for; unset until the root has a size.
@@ -171,6 +176,7 @@ export class View {
       this.index.remove(rect, id)
       this.rects.delete(id)
       this.wires.free(rect)
+      if (this.mini) this.gone.push(rect)
     }
     this.sketch?.nodes.delete(id)
     this.shifted.delete(id)
@@ -179,7 +185,6 @@ export class View {
       this.resize.unobserve(el)
       el.remove()
     }
-    this.mini?.drop(id)
     if (this.graph.memberOf.has(id)) this.regroup = true
     this.els.delete(id)
     this.contents.delete(id)
@@ -211,11 +216,15 @@ export class View {
     this.update()
   }
 
-  /** Frame rect in world px of every group with members shown. */
-  frames() {
-    const out = new Map<string, Rect>()
-    for (const [g, ids] of this.graph.members()) out.set(g, frameAround(ids.map(id => this.box(id))))
-    return out
+  /** Frame rect in world px of every group with members shown, as of the last frame. */
+  frames(): ReadonlyMap<string, Rect> {
+    return this.framed
+  }
+
+  /** A group's frame from where its members are right now; undefined while none is shown. */
+  frameOf(group: string) {
+    const ids = this.graph.membersOf(group)
+    return ids.length ? frameAround(ids.map(id => this.box(id))) : undefined
   }
 
   /** Sets pan offset and zoom, applied on the next frame; cancels a pending fit. */
@@ -353,7 +362,15 @@ export class View {
     if (this.unplaced.size) this.autoLayout()
     for (const id of this.moved) this.sync(id)
     this.pullApart()
+    this.reframe()
     const fitted = this.fitting && this.fitAll()
+    const far = this.far
+    // A theme switch: canvases redraw everything in the new colours.
+    let themed = false
+    if ((far || this.settings.minimap) && !this.moved.size && now - this.themed > 500) {
+      this.themed = now
+      themed = this.paint().changed()
+    }
     // Moved in or out of the mount area, or into view by the fit: new elements wait for next frame.
     const late = fitted ? this.cull(true) : []
     for (const id of this.moved) {
@@ -363,14 +380,15 @@ export class View {
     }
     if (this.regroup || this.moved.size) {
       this.regroup = false
-      this.groups.render(this.frames())
+      this.groups.render(this.framed)
     }
     this.toggleMinimap()
-    this.mini?.render(this.moved, this.panned || fitted)
+    if (themed) this.mini?.repaint()
+    this.mini?.render(this.shifted, this.gone.splice(0), this.panned || fitted)
     // Read before the wires take the graph's changed wire keys.
     const edited = this.sketch ? [...this.graph.dirty] : []
     this.wires.render(this.shifted, this.dragging, this.settings.virtual ? this.area ?? NOWHERE : undefined)
-    this.paintSketch(edited, now)
+    this.paintSketch(edited, themed)
     this.renderOverlays()
     this.dirty.clear()
     this.moved.clear()
@@ -382,10 +400,9 @@ export class View {
     if (this.panned || fitted) this.onViewport?.()
     this.panned = false
     this.onFrame?.(now)
-    const far = this.far
     if (this.dots.draw(now, this.x, this.y, this.k, this.width, this.height, far ? this.sketch : undefined)) this.update()
     clearTimeout(this.poll)
-    if (far) this.poll = setTimeout(() => this.update(), 500)
+    if (far || this.mini) this.poll = setTimeout(() => this.update(), 500)
   }
 
   private move(n: NodeDef, x: number, y: number) {
@@ -440,18 +457,12 @@ export class View {
   }
 
   // Keeps the shapes of nodes and wires in step with the graph: all of them the first time the view
-  // goes far, then only what changed, so later frames cost what changed. A theme switch repaints
-  // all; it is looked for at most twice a second, in frames where nothing moved.
-  private paintSketch(edited: WireKey[], now: number) {
-    let all = !this.sketch
-    if (all) {
+  // goes far or the theme switches, then only what changed, so later frames cost what changed.
+  private paintSketch(edited: WireKey[], themed: boolean) {
+    const all = !this.sketch || themed
+    if (!this.sketch) {
       if (!this.far) return
       this.sketch = new Sketch()
-      this.paints = new Paints(this.world, this.svg)
-    }
-    if (this.far && !this.moved.size && now - this.themed > 500) {
-      this.themed = now
-      if (this.paints!.changed()) all = true
     }
     if (all) {
       for (const id of this.graph.nodes.keys()) this.paintNode(id)
@@ -468,7 +479,7 @@ export class View {
   private paintNode(id: string) {
     const n = this.graph.nodes.get(id)
     if (!n) return this.sketch!.nodes.delete(id)
-    const [fill, border] = this.paints!.node(n.classes ?? [], this.selected.nodes.has(id))
+    const [fill, border] = this.paint().node(n.classes ?? [], this.selected.nodes.has(id))
     this.sketch!.node(id, this.rects.get(id) ?? this.box(id), fill, border)
   }
 
@@ -481,7 +492,16 @@ export class View {
     const s: Point = [pa[0] + da[0] * STUB, pa[1] + da[1] * STUB]
     const t: Point = [pb[0] + db[0] * STUB, pb[1] + db[1] * STUB]
     const mx = (s[0] + t[0]) / 2
-    this.sketch!.wire(key, [pa, s, [mx, s[1]], [mx, t[1]], t, pb], this.paints!.wire(this.graph.classes.get(key) ?? []))
+    this.sketch!.wire(key, [pa, s, [mx, s[1]], [mx, t[1]], t, pb], this.paint().wire(this.graph.classes.get(key) ?? []))
+  }
+
+  // Colours from the stylesheet for what canvases draw.
+  private paint() {
+    if (!this.paints) {
+      this.paints = new Paints(this.world, this.svg)
+      this.paints.changed()
+    }
+    return this.paints
   }
 
   // Takes a node's element out of the page; its content element stays with the node definition.
@@ -522,6 +542,22 @@ export class View {
     if (!this.shifted.has(id)) this.shifted.set(id, old)
   }
 
+  // Makes the frames of groups whose members moved again; all of them after membership changes.
+  private reframe() {
+    const groups = this.regroup ? this.graph.groups.keys() : new Set(this.moved).values()
+    const done = new Set<string>()
+    for (const key of groups) {
+      // Moved ids name nodes: their group, if any, is what to frame.
+      const g = this.regroup ? key : this.graph.memberOf.get(key)
+      if (g === undefined || done.has(g)) continue
+      done.add(g)
+      const frame = this.frameOf(g)
+      if (frame) this.framed.set(g, frame)
+      else this.framed.delete(g)
+    }
+    if (this.regroup) for (const g of this.framed.keys()) if (!this.graph.groups.has(g)) this.framed.delete(g)
+  }
+
   // Pulls apart nodes that code, a saved state or growing content put on top of each other.
   private pullApart() {
     const changed = [...this.moved].filter(id => !this.dragging.has(id))
@@ -535,7 +571,7 @@ export class View {
 
   // Follows the `minimap` option, which Flow.set() may have changed since the last frame.
   private toggleMinimap() {
-    if (this.settings.minimap && !this.mini) this.mini = new Minimap(this)
+    if (this.settings.minimap && !this.mini) this.mini = new Minimap(this, this.paint())
     else if (!this.settings.minimap && this.mini) {
       this.mini.destroy()
       this.mini = undefined
