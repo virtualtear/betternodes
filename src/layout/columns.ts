@@ -1,25 +1,35 @@
-import { FRAME, snap, type Point } from '../geometry/rect'
-import { nodeOf, type Graph } from '../model/graph'
+import { FRAME, snap, type Point, type Rect } from '../geometry/rect'
+import { nodeOf, type Graph, type NodeDef } from '../model/graph'
 import type { Edge } from '../model/state'
 
 const GAP_X = 80
 const GAP_Y = 40
 
 /**
- * Positions for nodes that have none yet (`placed` unset); the view then marks them placed, so each
- * node is laid out once. Columns follow the longest wire path from a source node, rows are ordered
+ * Positions for the nodes in `todo`, which have none yet; the view then marks them placed, so each
+ * node is laid out once. Columns follow the longest wire path within the batch, rows are ordered
  * to cut wire crossings (see {@link untwist}), columns are centered vertically, results snap to
  * `grid`. Each group gets a band of its own, stacked top to bottom with room for its frame, so no
  * frame reaches over other nodes.
  * @param sizes - measured node sizes in world px.
+ * @param after - the area placed nodes cover; the batch starts right of it, never on top of them.
+ * @remarks Only wires within the batch count, found through each node's own wires, so the cost
+ * follows the batch, not the graph.
  */
 // Positions are fixed at first measure; f.layout() re-runs it when content has grown since.
-export function layout(graph: Graph, sizes: Map<string, Point>, grid: number) {
+export function layout(graph: Graph, todo: NodeDef[], sizes: ReadonlyMap<string, Point>, grid: number, after?: Rect) {
   const out = new Map<string, Point>()
-  const todo = [...graph.nodes.values()].filter(n => !n.placed)
   if (!todo.length) return out
 
-  const incoming = Map.groupBy(graph.edges.values(), ([, to]) => nodeOf(to))
+  const batch = new Set(todo.map(n => n.id))
+  const edges: Edge[] = []
+  for (const id of batch) {
+    for (const key of graph.wiresAt(id)) {
+      const edge = graph.edges.get(key)!
+      if (nodeOf(edge[1]) === id && batch.has(nodeOf(edge[0]))) edges.push(edge)
+    }
+  }
+  const incoming = Map.groupBy(edges, ([, to]) => nodeOf(to))
   const depths = new Map<string, number>()
   const visiting = new Set<string>()
   // Longest wire path into `root`, depth first. An explicit stack, not recursion: a chain wired
@@ -53,7 +63,7 @@ export function layout(graph: Graph, sizes: Map<string, Point>, grid: number) {
 
   const columns: string[][] = []
   for (const n of todo) (columns[depth(n.id)] ??= []).push(n.id)
-  untwist(columns, graph.edges.values())
+  untwist(columns, edges)
   const size = (id: string) => sizes.get(id) ?? [0, 0]
   const height = (col: string[]) => col.reduce((sum, id) => sum + size(id)[1] + GAP_Y, -GAP_Y)
   // One band per group in order of first appearance, '' for ungrouped nodes. Without groups there
@@ -62,14 +72,7 @@ export function layout(graph: Graph, sizes: Map<string, Point>, grid: number) {
   const bands = [...new Set(todo.map(n => bandOf(n.id)))]
   const cell = (col: string[], band: string) => col.filter(id => bandOf(id) === band)
 
-  // A batch added after the first layout starts right of the placed nodes, never on top of them.
-  let [x, top] = [-Infinity, Infinity]
-  for (const n of graph.nodes.values()) {
-    if (!n.placed) continue
-    x = Math.max(x, n.x + size(n.id)[0] + GAP_X)
-    top = Math.min(top, n.y)
-  }
-  if (top === Infinity) [x, top] = [0, 0]
+  let [x, top] = after ? [after[0] + after[2] + GAP_X, after[1]] : [0, 0]
   // Each band is as tall as its tallest column; frames get their margins on top of the gap.
   const spans = new Map<string, [top: number, height: number]>()
   for (const band of bands) {

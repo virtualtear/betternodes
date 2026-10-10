@@ -90,7 +90,7 @@ test('layout: 1000 new nodes', async () => {
     sizes.set(`n${i}`, [160, 37])
     if (i) graph.connect(`n${Math.floor((i - 1) / 2)}`, `n${i}`) // a binary tree: wide columns
   }
-  await measure('layout: 1000 new nodes (binary tree)', { budget: 5, run: () => layout(graph, sizes, 20) })
+  await measure('layout: 1000 new nodes (binary tree)', { budget: 5, run: () => layout(graph, [...graph.nodes.values()], sizes, 20) })
 })
 
 test('route: 10 wires across 1000 scattered nodes', async () => {

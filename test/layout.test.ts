@@ -17,7 +17,7 @@ function graphOf(ids: string[], wires: [string, string][]) {
 
 const columnsOf = (ids: string[], wires: [string, string][]) => {
   const { graph, sizes } = graphOf(ids, wires)
-  const out = layout(graph, sizes, 20)
+  const out = layout(graph, [...graph.nodes.values()], sizes, 20)
   return ids.map(id => out.get(id)![0] / 240)
 }
 
@@ -39,7 +39,7 @@ test('a chain far longer than the call stack is deep gets one column per node', 
 
 const positionsOf = (ids: string[], wires: [string, string][]) => {
   const { graph, sizes } = graphOf(ids, wires)
-  return layout(graph, sizes, 20)
+  return layout(graph, [...graph.nodes.values()], sizes, 20)
 }
 
 test('rows are reordered when that uncrosses wires between columns', () => {
@@ -57,4 +57,14 @@ test('a layout whose wires do not cross keeps insertion order', () => {
     const ys = column.map(id => at.get(id)![1])
     expect(ys).toEqual([...ys].sort((p, q) => p - q))
   }
+})
+
+test('a later batch starts right of the placed nodes, with columns from wires within the batch', () => {
+  const { graph, sizes } = graphOf(['a', 'b', 'c'], [['a', 'b'], ['b', 'c']])
+  graph.nodes.get('a')!.placed = true
+  const batch = ['b', 'c'].map(id => graph.nodes.get(id)!)
+  const out = layout(graph, batch, sizes, 20, [0, 0, 1000, 400])
+  // b's wire from the placed a doesn't count: b opens the batch's first column.
+  expect([out.get('b')![0], out.get('c')![0]]).toEqual([1080, 1320])
+  expect(out.has('a')).toBe(false)
 })

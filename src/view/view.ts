@@ -68,6 +68,10 @@ export class View {
   private readonly stale = new Set<string>()
   // This frame's nodes whose rect changed, with the rect they had before; undefined for new ones.
   private readonly shifted = new Map<string, Rect | undefined>()
+  // Nodes waiting for auto-layout.
+  private readonly unplaced = new Set<string>()
+  // The area nodes have covered so far. It only grows, so a later layout batch never lands on them.
+  private extent?: Rect
   private readonly resize = new ResizeObserver(entries => {
     for (const e of entries) this.stale.add((e.target as HTMLElement).dataset.node!)
     this.update()
@@ -143,7 +147,9 @@ export class View {
 
   /** Schedules a full node re-render (title, content, anchors) on the next frame. */
   mark(id: string) {
-    if (!this.graph.nodes.has(id)) return // deleted: its definition can change, but it isn't shown
+    const n = this.graph.nodes.get(id)
+    if (!n) return // deleted: its definition can change, but it isn't shown
+    if (!n.placed) this.unplaced.add(id)
     this.dirty.add(id)
     this.update()
   }
@@ -189,7 +195,9 @@ export class View {
     for (const n of this.graph.nodes.values()) {
       n.placed = false
       this.stale.add(n.id)
+      this.unplaced.add(n.id)
     }
+    this.extent = undefined
     cancelAnimationFrame(this.frame)
     this.flush(performance.now())
   }
@@ -283,8 +291,8 @@ export class View {
     for (const id of this.dirty) this.renderNode(this.graph.nodes.get(id)!)
     for (const id of this.moved) this.renderPlace(this.graph.nodes.get(id)!)
     for (const id of this.stale) if (this.measure(id)) this.moved.add(id)
-    // Unplaced nodes are always stale: node() and relayout() both mark them.
-    if (this.stale.size) this.autoLayout()
+    // After measuring: unplaced nodes are always stale, since node() and relayout() mark them.
+    if (this.unplaced.size) this.autoLayout()
     for (const id of this.moved) this.sync(id)
     this.pullApart()
     if (this.regroup || this.moved.size) {
@@ -314,7 +322,9 @@ export class View {
 
   // Runs after measuring, since it needs sizes. `placed` keeps later wire changes from moving a node again.
   private autoLayout() {
-    for (const [id, [x, y]] of layout(this.graph, this.sizes, GRID)) {
+    const todo = [...this.unplaced].flatMap(id => this.graph.nodes.get(id) ?? []).filter(n => !n.placed)
+    this.unplaced.clear()
+    for (const [id, [x, y]] of layout(this.graph, todo, this.sizes, GRID, this.extent)) {
       const n = this.graph.nodes.get(id)!
       n.placed = true
       if (n.x !== x || n.y !== y) this.move(n, x, y)
@@ -332,6 +342,9 @@ export class View {
     if (old) this.index.move(old, rect, id)
     else this.index.add(rect, id)
     this.rects.set(id, rect)
+    const e = this.extent
+    const inside = e && e[0] <= rect[0] && e[1] <= rect[1] && e[0] + e[2] >= rect[0] + w && e[1] + e[3] >= rect[1] + h
+    if (!inside) this.extent = e ? union([e, rect]) : rect
     if (!this.shifted.has(id)) this.shifted.set(id, old)
   }
 
