@@ -12,8 +12,10 @@ import { View } from './view/view'
 const RIGHTS = ['connect', 'move', 'remove'] as const satisfies readonly (keyof Settings)[]
 
 /** A node graph mounted in a DOM element. Starts in view mode unless the `mode` option says otherwise. */
-export class Flow extends EventTarget {
+export class Flow {
   private readonly graph = new Graph()
+  // Private, so only the flow itself can fire events: on() is the one way in.
+  private readonly events = new EventTarget()
   private readonly view: View
   private readonly packets: Packets
   private readonly history: History<State>
@@ -26,7 +28,6 @@ export class Flow extends EventTarget {
    * @throws if `minZoom` is above `maxZoom`.
    */
   constructor(private readonly root: HTMLElement, options: FlowOptions = {}) {
-    super()
     this.settings = settle(options)
     this.history = new History(this.settings.history)
     this.view = new View(root, this.graph, this.settings)
@@ -211,7 +212,7 @@ export class Flow extends EventTarget {
    * @param options - `signal` unsubscribes when aborted, e.g. in a framework effect's cleanup.
    */
   on<K extends keyof FlowEvents>(type: K, fn: (...args: FlowEvents[K]) => void, options?: { signal?: AbortSignal }) {
-    this.addEventListener(type, e => fn(...(e as CustomEvent<FlowEvents[K]>).detail), options)
+    this.events.addEventListener(type, e => fn(...(e as CustomEvent<FlowEvents[K]>).detail), options)
     return this
   }
 
@@ -344,7 +345,7 @@ export class Flow extends EventTarget {
   }
 
   private fire(...[type, ...args]: Emitted<FlowEvents>) {
-    this.dispatchEvent(new CustomEvent(type, { detail: args }))
+    this.events.dispatchEvent(new CustomEvent(type, { detail: args }))
   }
 
   private wire(from: string, to: string) {

@@ -42,6 +42,8 @@ flow(document.createElement('div'), { canConnect: (from, to) => from !== to })
 g.set({ canConnect: () => 'yes' })
 // @ts-expect-error unknown event
 g.on('drag', () => {})
+// @ts-expect-error events are only fired by the flow itself, never forged from outside
+g.dispatchEvent(new CustomEvent('change'))
 // @ts-expect-error unknown anchor
 g.wireClass('a.x', 'b', 'ok')
 void zoom
