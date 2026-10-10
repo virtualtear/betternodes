@@ -397,10 +397,15 @@ export class View {
     this.stale.add(n.id)
   }
 
+  // Includes bn-selected, and writes only a changed class list: dropping it here for the overlay pass to
+  // add back cost two style invalidations per selected node in every frame of a drag.
   private renderPlace(n: NodeDef) {
     const classes = ['bn-node', ...n.classes ?? []]
     if (this.dragging.has(n.id)) classes.push('bn-dragging')
-    this.els.get(n.id)!.className = classes.join(' ')
+    if (this.selected.nodes.has(n.id)) classes.push('bn-selected')
+    const className = classes.join(' ')
+    const el = this.els.get(n.id)!
+    if (el.className !== className) el.className = className
     this.move(n, n.x, n.y)
   }
 
