@@ -264,6 +264,30 @@ test('frames with 200 labelled wires', async () => {
   el.remove()
 })
 
+// Group frames are redrawn in the minimap on every frame in which a node moved.
+test('frames with 20 groups and the minimap', async () => {
+  const { el, f } = mount(1000)
+  for (let g = 0; g < 20; g++) f.group(`g${g}`).nodes(...Array.from({ length: 10 }, (_, i) => `n${g * 40 + i}`))
+  f.set({ minimap: true })
+  frameNow(f)
+  frameNow(f)
+  let step = 0
+  const dragged = graphOf(f).nodes.get('n500')!
+  await measure('frame: dragging one node, 20 groups, minimap on (1000 nodes)', {
+    budget: 8,
+    runs: 60,
+    run: () => {
+      view(f).dragging = new Set(['n500'])
+      dragged.x = gridAt(500)[0] + (++step % 10) * 20
+      dragged.y = gridAt(500)[1] + 60
+      view(f).place('n500')
+      frameNow(f)
+    },
+  })
+  f.destroy()
+  el.remove()
+})
+
 // Real frames driven by real pointer events: what a user on the ?n=1000 demo would see.
 test('frame rate on a 1000-node graph', async () => {
   const { el, f } = mount(1000)

@@ -8,6 +8,8 @@ export class Minimap {
   private readonly visible = svg('rect', 'bn-mini-view')
   private readonly rects = new Map<string, SVGRectElement>()
   private readonly frames = svg('g')
+  // One rect per group frame, kept between frames like the node rects.
+  private readonly groups = new Map<string, SVGRectElement>()
   // Bounds of all nodes, kept between frames in which no node moved; none without nodes.
   private nodes?: Rect
   // Every node needs drawing, e.g. right after the minimap was turned on.
@@ -28,11 +30,17 @@ export class Minimap {
       for (const id of this.full ? graph.nodes.keys() : moved) this.renderNode(id)
       const boxes = [...graph.nodes.keys()].map(id => this.view.box(id))
       this.nodes = boxes.length ? union(boxes) : undefined
-      this.frames.replaceChildren(...[...this.view.frames().values()].map(([x, y, width, height]) => {
-        const rect = svg('rect', 'bn-mini-group')
+      const frames = this.view.frames()
+      for (const [id, rect] of this.groups) {
+        if (frames.has(id)) continue
+        rect.remove()
+        this.groups.delete(id)
+      }
+      for (const [id, [x, y, width, height]] of frames) {
+        let rect = this.groups.get(id)
+        if (!rect) this.groups.set(id, (rect = this.frames.appendChild(svg('rect', 'bn-mini-group'))))
         setAttrs(rect, { x, y, width, height })
-        return rect
-      }))
+      }
     }
     this.full = false
     const { x, y, k, width, height } = this.view
