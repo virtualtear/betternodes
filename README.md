@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen.svg)
-![Size: 18.3 kB min+gzip](https://img.shields.io/badge/size-18.3%20kB%20min%2Bgzip-informational.svg)
+![Size: 24 kB min+gzip](https://img.shields.io/badge/size-24%20kB%20min%2Bgzip-informational.svg)
 ![TypeScript](https://img.shields.io/badge/types-TypeScript-3178c6.svg)
 
 A node graph viewer and editor built on plain DOM and SVG, with no framework required. You define
@@ -16,14 +16,15 @@ edit comes out as JSON.
 
 ## Features
 
-- No runtime dependencies, about 18 kB min+gzip
+- No runtime dependencies, about 24 kB min+gzip
 - Works with React, Vue, Svelte or no framework
 - View and edit modes, with undo and redo
 - Right-angled wires that route around nodes and carry notes
 - Auto-layout, groups, a minimap, and light and dark themes
 - Animated packets, drawn with WebGL
 - JSON state and diffs for every user edit
-- Drag frames stay under 5 ms on a 1000-node graph ([benchmarks](TECHNICAL.md#tests-and-benchmarks))
+- Large graphs stay smooth: only nodes and wires near the view are in the page, and zoomed far out
+  the GPU draws them all. At 100k nodes a drag frame takes under a millisecond ([benchmarks](TECHNICAL.md#tests-and-benchmarks))
 
 ## Installation
 
@@ -99,6 +100,16 @@ f.on('change', () => localStorage.setItem('graph', JSON.stringify(f.state())))
 f.on('change', diff => api.patch('/graph', diff))
 ```
 
+```ts
+type Diff = {
+  added: Edge[]
+  removed: Edge[]
+  moved: Record<string, [x: number, y: number]>   // new positions
+  nodesRemoved: string[]
+  nodesRestored: string[]                          // deleted nodes brought back, e.g. by undo
+}
+```
+
 `load()` drops invalid entries with a warning. A state with the wrong shape changes nothing.
 
 ### Packets
@@ -171,6 +182,7 @@ Pass them to `flow()` or change them later with `f.set()`.
 | `remove` | `true` | Users can delete nodes and wires |
 | `snap` | `true` | Snap dropped nodes to a 20px grid |
 | `minimap` | `false` | Overview in the bottom-right corner |
+| `virtual` | `true` | Only nodes near the view get elements; `false` keeps every node in the page |
 | `canConnect` | allows all | `(from, to) => boolean` for wires users draw |
 
 Options only limit users. Calls from your code always work.
@@ -187,6 +199,11 @@ Options only limit users. Calls from your code always work.
 | `.class(...names)` | CSS classes on the node |
 
 `f.remove(id)` deletes a node and its wires.
+
+A node far from the view has no element, and below 40% zoom the GPU draws nodes as plain boxes
+instead. Its `.content()` element stays with the node and comes back with it, but is out of the page
+meanwhile, so a video in it stops. A node that holds focus keeps its element. Set `virtual: false`
+to keep every node in the page.
 
 ### Groups
 
@@ -291,8 +308,12 @@ Override CSS variables on the root element:
 | `--bn-minimap-bg`, `--bn-minimap-node`, `--bn-minimap-view` | Minimap |
 
 Elements: `.bn-node`, `.bn-title`, `.bn-selected`, `.bn-dragging`, `.bn-wire`, `.bn-label`,
-`.bn-group`, `.bn-minimap`, `.bn-packet`. Classes from `.class()`, `wireClass()` and `send()` land on
-these.
+`.bn-group`, `.bn-minimap`, `.bn-mini-node`, `.bn-packet`. Classes from `.class()`, `wireClass()` and
+`send()` land on these.
+
+Far out, and in the minimap, nodes and wires are drawn on a canvas in the colours these rules give
+them: a node's background and `--bn-node-border`, a wire's stroke, and `fill` for `.bn-mini-node`.
+A theme switch reaches the canvas within half a second.
 
 ```css
 .bn-node.error { --bn-node-border: #f43f5e80; --bn-node-hover: #f43f5e; }
@@ -302,7 +323,8 @@ these.
 
 ## Browser support
 
-Current Chrome, Edge, Firefox and Safari. Packets fall back to SVG without WebGL2.
+Current Chrome, Edge, Firefox and Safari. Without WebGL2, packets fall back to SVG, and nodes show
+as elements at every zoom.
 
 ## How it works
 

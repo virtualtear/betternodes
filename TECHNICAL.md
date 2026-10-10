@@ -13,6 +13,11 @@ All DOM work waits for the next animation frame, and inside that frame every wri
 any read. A frame only touches what changed: dragging a node re-routes the wires near it and leaves
 the others alone.
 
+Nothing a frame or an edit does walks all nodes or all wires. Only nodes and wires near the view
+have elements, and far out the GPU draws them as plain shapes, so the size of the graph doesn't
+decide how smoothly it pans or drags. Calls that ask for the whole graph, such as `state()`,
+`load()` or a fit of everything, still cost time in proportion to it.
+
 Routing tries cheap shapes before it searches. Straight, L and Z shapes cover most wires, and the
 A* search that handles the rest has a hard cap on its work.
 
@@ -64,9 +69,9 @@ src/
   model/            graph, saved state and diffs, undo history
   geometry/         rects, spatial hash, heap, routing, lanes, SVG paths
   layout/           auto-layout and pulling overlaps apart
-  view/             frame loop, nodes, wires, groups, minimap
+  view/             frame loop, culling, nodes, wires, groups, minimap, the GPU layer
     input/          pointer and keyboard input
-    packets/        packets and their WebGL renderer
+    packets/        packets
 test/               browser tests and compile-time type checks
 bench/              benchmarks with budgets
 index.html          demo page
@@ -107,8 +112,38 @@ wires, overlays and packets. Nothing reads layout after the measuring step, so t
 once per frame.
 
 Panning changes a single CSS transform on the world element and leaves the nodes alone. Below 50%
-zoom, a `bn-far` class hides the anchors: they are too small to grab at that size, and thousands of
-them on screen slow panning down. When nothing changes, no frame runs at all.
+zoom, a `bn-far` class hides the anchors: they are too small to grab at that size. When nothing
+changes, no frame runs at all.
+
+### Culling
+
+A page slows down with the number of elements in it, whatever the code does: panning a graph whose
+50k nodes all had elements ran at 5 fps. So only nodes in the mount area get an element: the view
+grown by half its size on every side. The area is made again only once the view leaves its inner
+part or zooms in a lot, so most pans touch no element. Panning with 500 nodes in the page runs at
+60 fps, with 5000 at 53, and the mount area keeps the count in the hundreds.
+
+A node keeps its element while it is being dragged, holds focus or waits for auto-layout, which
+needs its size. A node without an element uses its last measured size, or until then the size of
+the first node measured, for routing and overlaps. When a measurement turns out different, the
+usual path for a node that changed size takes over, mostly inside the margin, out of view. The
+`virtual: false` option gives every node an element, for content that must stay in the page, such
+as a video. Wires are culled the same way, see below.
+
+### Far out
+
+Below 40% zoom, titles are under 6px tall, and nodes and wires give up their elements, except a node
+that holds focus or waits for layout. The WebGL2 canvas that draws packets also draws every node as
+a rect with its border, and every wire as the stub-and-Z shape routing falls back to. Each is a
+fixed-size record in a byte array: built once when the view first goes far, then rewritten only for
+what changed and uploaded as one range. Panning changes only the shader's uniforms. Rects are two
+plain triangles each: instanced drawing ran at 1 fps in software renderers, while plain triangles
+drew 100k rects at 60 fps.
+
+Colours come from the stylesheet through hidden probe elements, so status classes, the selection
+accent and themes carry over. Reading them forces a style recalc, so the view looks for a theme
+switch at most twice a second, in frames where nothing moved, and a far view that is otherwise
+idle wakes up for that. Without WebGL2 the view keeps elements at every zoom.
 
 ## Graph and state
 
@@ -129,35 +164,42 @@ type State = {
 ```
 
 Your code stays the single source of truth for what a node is, and the saved state stays small,
-plain JSON. Each `change` event carries the full state and a `Diff`, so a server can store just
-what changed. `change` only fires for user edits, never for your own calls, so saving on `change`
+plain JSON. Each `change` event carries a `Diff` of what the edit changed, so a server can store
+just that; a listener that wants the whole state calls `state()`, which costs time in proportion
+to the graph. `change` only fires for user edits, never for your own calls, so saving on `change`
 can't start a loop.
 
 A wire end is written as `'node.anchor'` or just `'node'` and split at the first dot. A wire's key
 in the graph's maps is `'from>to'`. That's why node ids can't contain `.` or `>`: with `>` allowed,
 a wire from `a` to `b>c` and one from `a>b` to `c` would get the same key.
 
-`Graph.version` goes up on every structural change, such as adding or removing a wire. The renderer
-compares it with the version it last drew. If it's the same and nothing moved, there is no wire
-work to do.
+The graph keeps the wires at each node, the members of each group, and the keys of the wires added,
+deleted, noted or classed since the view last drew. Removing nodes visits only their own wires, and
+the view finds what a change touched without walking the graph. Deleting 100 selected nodes from a
+100k-node graph takes about 1 ms, frame included.
 
 ## Undo
 
-Before each user edit, the current `State` goes onto a stack that holds up to `history` entries
-(100 by default). Undo and redo load a snapshot through the same checked `load()` path that saved
-data uses, and only the nodes whose position changed get placed again. On a 1000-node graph,
-undoing a one-node move takes 2.8 ms. Each arrow-key press is its own undo step.
+A user edit is recorded while it happens. The gesture tracks the nodes it moves, and the graph
+reports each wire and node it changes on the edit's behalf; calls your code makes in the meantime
+aren't recorded. Closing the record gives the `Diff` for the change event and the undo step: the
+wires added and removed, the nodes deleted, and where the moved nodes were before. A stack holds up
+to `history` steps (100 by default), and each arrow-key press is its own step.
 
-Snapshots are stored whole rather than as diffs because a snapshot is always correct. Diffs would
-need an inverse for every kind of edit, and each inverse is one more place for a bug. The price is
-memory, roughly `history` times the size of one state.
+Undo applies a step backwards: it brings deleted nodes back, reconnects removed wires, removes
+added ones and moves nodes back. Redo applies it forwards. Both touch only what the edit changed,
+and a part that no longer applies, such as a wire to a node your code removed since, is skipped.
+So undo reverts the user's edit, not changes your code made after it, and a wire it brings back
+goes to the end of `state().edges`. Undoing a nudge takes 0.1 ms at 100k nodes, and the step of a
+one-node move holds two positions: where the node went and where it was.
 
 ## Routing wires
 
 A wire is routed in these steps:
 
 1. It leaves its anchor in a straight 20px stub, shorter if a neighbour is close.
-2. Only nodes in a region around the wire count as obstacles.
+2. Only nodes within the wire's reach count as obstacles: its ends grown by both stubs and a
+   margin. The view's node index finds them.
 3. Five cheap shapes are tested: straight, two L shapes and two Z shapes. The cheapest one that
    isn't blocked wins.
 4. If all five are blocked, an A* search looks for a way around.
@@ -187,64 +229,102 @@ Wires that would run on top of each other are spread into lanes side by side, up
 Only the middle segments move, so wires still start and end exactly on their anchors. The whole
 spread stays inside the clearance band, so no lane touches a node.
 
+### Culling wires
+
+Every wire has a span: its two nodes' rects grown by how far routing looks around them, plus its
+route's box once it has one, since a detour around a big node can leave the rest. Spans sit in a
+second spatial index. A wire whose span meets the mount area gets an element, a route, lanes and a
+note; the rest cost nothing until they come into view. Lanes are spread over those wires only, so
+a lane offset can change as a neighbour comes or goes at the edge of the area, out of view. A packet
+on a wire without an element gets a route of its own, without lanes.
+
+Which wires a frame re-routes comes from what changed: the graph's changed wire keys, the wires at
+nodes that moved, and the wires whose span meets a moved spot. When moved spots are many compared
+with the wires on screen, as in a group drag, testing each of those wires beats one lookup per
+spot. During a group drag, the spans of wires inside the group wait for the drop, and those wires
+keep their elements.
+
 ## Skipping work that didn't change
 
 Each frame works out what a change could have affected and skips the rest:
 
 | When | What gets skipped |
 | --- | --- |
-| Nothing moved and the graph version is unchanged | All wire work |
-| One node is dragged | Wires whose box doesn't touch its old or new spot |
+| Nothing moved, no wire changed and the view stayed put | All wire work |
+| A node or wire is far from the view | Its element, route, lanes and note |
+| One node is dragged | Wires whose span doesn't meet its old or new spot |
 | Several nodes are dragged together | Re-routing wires between two of them; those wires move along |
 | A wire's points didn't change | Its SVG path string and its packet track |
+| A wire wasn't redrawn and no node moved near its note | Placing the note again |
 | A node's title or content didn't change | Its DOM, so focus in an input stays put |
 | A node's classes didn't change | Writing its `className` |
-| Undo, redo or `load()` | Nodes whose position stayed the same |
-| Nothing was measured this frame | Auto-layout |
+| A group's members kept still | Its frame |
+| Undo or redo | Everything the edit didn't change |
+| No node waits for layout | Auto-layout |
 
 Wire notes are sized from their text length, at 6.5px per character, because measuring them would
-cost a layout per note. The minimap reuses its group rectangles instead of creating new ones every
-drag frame. Removing many nodes walks the wire list once instead of once per node, so removing 1000
-nodes takes 0.2 ms.
+cost a layout per note.
+
+The minimap is a canvas. Nodes are drawn once into an offscreen cache at a fixed scale, a node that
+moves clears and redraws only the spots it left and took, and every frame scales the cache into
+view with the group frames and the visible area on top. With the minimap on, a 50k-node graph drags
+in 0.4 ms per frame.
 
 ## The spatial hash
 
-The spatial hash answers "what is near this rectangle?" without looking at every node. It is a grid
-of 256px buckets, and each rectangle goes into every bucket it touches. Bucket keys are numbers
-(`cx * 1_000_003 + cy`) rather than strings, so a lookup builds no strings. That matters because
-overlap removal runs thousands of lookups.
+The spatial hash answers "what is near this rectangle?" without looking at every node. The view
+keeps one of node rects, updated only for nodes that moved or resized, and the wires keep one of
+their spans. Routing, note placement, pulling apart overlaps, dropping dragged nodes, box selection,
+culling and hits far out all use them.
+
+It is a grid of 256px buckets, and each rectangle goes into every bucket it touches. A bucket key
+packs the two cell indices into one integer, so a lookup builds no strings, and keys stay exact for
+coordinates up to 2^30. A rect that moves within the same buckets, as in most frames of a drag, is
+swapped in place instead of removed and added.
 
 Some rectangles are never walked bucket by bucket. Anything wider or taller than 64 buckets, or with
-coordinates beyond 2^50, goes into a separate list that is checked one entry at a time. Past 2^50,
-`cx++` no longer changes the number, and a loop over the cells would never end. Queries over huge
-areas scan only the buckets that exist. Together, these limits keep the work bounded for any input,
-`Infinity` included.
+coordinates beyond 2^30, goes into a separate list that is checked one entry at a time. Queries over
+huge areas scan only the buckets that exist. Together, these limits keep the work bounded for any
+input, `Infinity` included.
 
 The hash keeps its own private copy of the rectangle overlap check. Sharing that function with the
 router made it polymorphic in V8, and free-spot searches measured about 60% slower.
 
 ## Layout and overlap removal
 
-Auto-layout puts each node in a column given by the longest wire path leading into it. Inside a
-column, nodes keep the order they were added in, and columns are centred vertically. Each group
-gets its own horizontal band so its frame never reaches over other nodes. Nodes added later go to
-the right of the existing ones. A node is only laid out once, and positions from `at()`, `load()`
-or a drag always win.
+Auto-layout puts each node in a column given by the longest wire path leading into it, and
+columns are centred vertically. Each group gets its own horizontal band so its frame never reaches
+over other nodes. Nodes added later go to the right of where nodes have been, an area that only
+grows. A node is only laid out once, and positions from `at()`, `load()` or a drag always win. Only
+the new nodes and the wires between them take part, so adding nodes to a large graph costs what is
+added.
+
+Rows inside a column are ordered to cut crossings between wires from one column to the next.
+Sweeping left to right, each node moves to the mean row of its neighbours in the column before;
+sweeping back, to the mean row of those in the column after. Rows count as fractions of their
+column, so columns of different heights compare. After each of four sweeps, a Fenwick tree counts
+the crossings, and an ordering is kept only if it has fewer than the best so far. So the result
+never has more crossings than insertion order, which also breaks ties: a graph without crossings
+keeps that order. On random graphs of 300 nodes, crossings drop from 122 to 22. Wires that skip a
+column are left out of this.
 
 The longest-path walk uses an explicit stack instead of recursion. Recursion would overflow the
 call stack on a chain of a few thousand nodes wired against insertion order, and a saved state can
 contain such a chain. When the walk closes a cycle, that wire counts as coming from depth -1, which
 ends the cycle.
 
-When nodes end up on top of each other, the spatial hash finds the overlapping pairs, looking only
-at nodes that changed. Of each pair, the node defined later moves. It searches the grid ring by ring
+When nodes end up on top of each other, the node index finds the overlapping pairs, looking only at
+nodes that changed. Of each pair, the node defined later moves. It searches the grid ring by ring
 for the nearest free spot, up to 500 rings out, so even hundreds of stacked nodes find room. Nodes
-being dragged are left alone until they are dropped.
+stacked on one spot search on from the ring where the previous one found room: 300 of them take
+8 ms instead of 85, at the price of possibly skipping a gap an inner ring still has. Nodes being
+dragged are left alone until they are dropped.
 
 ## Packets
 
 Each packet dot is a WebGL2 point sprite with 32 bytes of data. A frame uploads one buffer and makes
-one draw call, however many dots there are. Without WebGL2, dots fall back to SVG circles.
+one draw call, however many dots there are. Far out, the same canvas also draws the nodes and wires.
+Without WebGL2, dots fall back to SVG circles.
 
 Dots are still styled with CSS. Hidden probe circles get each packet class, and their computed
 `fill`, `stroke`, `stroke-width` and `r` become the dot's look. The looks are read again every
@@ -257,16 +337,18 @@ points on it with a binary search. Each packet stores its progress as a fraction
 when its wire re-routes, it stays at the same fraction of the new path. If the wire is deleted, the
 packet re-plans from the node it left, and it fades out when no route is left.
 
-A frame step is capped at 100 ms, so packets don't jump ahead when a background tab comes back.
-The WebGL context is released after 2 seconds without dots, since browsers allow only about 16
-contexts per page. With `prefers-reduced-motion` set, dropped dots disappear without a fade.
+A frame step is capped at 100 ms, so packets don't jump ahead when a background tab comes back. The
+WebGL context is released after 2 seconds with neither dots nor a far view, since browsers allow
+only about 16 contexts per page. With `prefers-reduced-motion` set, dropped dots disappear without a
+fade.
 
 ## Pointer input
 
 Gestures listen on `window`, so moves and the drop register wherever the pointer goes.
 `setPointerCapture` isn't used because it would retarget `pointerup` to the drag source. Holding a
 drag within 40px of the border pans the view, at a speed based on elapsed time rather than frame
-rate. A press that moves less than 4px counts as a click.
+rate. A press that moves less than 4px counts as a click. Far out, where nodes have no elements,
+the node under the pointer comes from the node index instead.
 
 ## Input checks
 
@@ -275,11 +357,11 @@ the work or memory grow without limit.
 
 | Input | Check | Without the check |
 | --- | --- | --- |
-| `load(state)` | Shape, numbers within ±10,000,000, wires as string pairs | `1e309` in JSON becomes `Infinity`, and loops over it never end |
+| `load(state)` | Shape, numbers within ±1,000,000,000, wires as string pairs | `1e309` in JSON becomes `Infinity`, and loops over it never end |
 | `at()`, `viewport()`, `zoomBy()` | Finite numbers, zoom above 0 | The same endless loops, or a broken view |
 | CSS class names | Not empty, no whitespace | `classList.add()` throws inside a frame, and rendering stays broken |
 | `send()` speed | Finite and above 0 | A speed of 0 never arrives, so the animation runs forever |
-| Node ids | No `.` or `>` | Two different wires can share one key |
+| Node ids | No `.` or `>`, not `__proto__` | Two different wires can share one key; a `__proto__` key in `state().positions` sets the prototype, and the position is lost |
 | Options | Zoom above 0, min not above max, whole-number history | Broken zoom or undo |
 
 `load()` checks the whole state before it touches the graph, so it never leaves a half-loaded graph
@@ -301,28 +383,47 @@ Tests run in headless Chromium through Vitest's browser mode, not in a simulated
 `ResizeObserver` and WebGL behave the way they do for users. `test/types.check.ts` is compiled but
 never run. Its `@ts-expect-error` lines prove that wrong calls fail to compile.
 
-`npm run bench` measures medians in the same headless Chromium, and a scenario fails when it goes
-over its budget. Frame budgets are 8 ms, about half of a 60 fps frame (16.7 ms), which leaves the
-rest for the browser and the host app.
+`npm run bench` measures medians in the same headless Chromium, which draws WebGL in software, and
+a scenario fails when it goes over its budget. Frame budgets are 8 ms, about half of a 60 fps frame
+(16.7 ms), which leaves the rest for the browser and the host app. The 1000-node graphs below fit
+into view far out, so their frames draw on the GPU.
 
 | Scenario | Median | Budget |
 | --- | --- | --- |
-| Mount 1000 nodes and 970 wires | 137 ms | 500 ms |
-| Frame while dragging a node, 1000 nodes | 0.7 ms | 8 ms |
-| Frame while dragging 100 nodes, 1000 nodes | 1.2 ms | 8 ms |
-| Same, minimap on | 4.2 ms | 8 ms |
-| Frame while dragging all 1000 nodes | 3 ms | 8 ms |
-| Frame after undoing a move, 1000 nodes | 2.8 ms | 10 ms |
-| Frame while panning, 1000 nodes | < 0.1 ms | 8 ms |
+| Mount 1000 nodes and 970 wires | 15 ms | 500 ms |
+| Mount 5000 nodes and 4843 wires | 43 ms | 3000 ms |
+| Frame while dragging a node, 1000 nodes | < 0.1 ms | 8 ms |
+| Same, 5000 nodes, a class on every wire | < 0.1 ms | 16 ms |
+| Same, 5000 nodes, 1000 notes on bent wires | 0.3 ms | 16 ms |
+| Same, 1000 nodes, 20 groups, minimap on | 0.1 ms | 8 ms |
+| Frame while dragging 100 nodes, 1000 nodes | 0.6 ms | 8 ms |
+| Same, minimap on | 2.2 ms | 8 ms |
+| Same, 5000 nodes | 0.5 ms | 32 ms |
+| Frame while dragging all 1000 nodes | 4 ms | 8 ms |
+| Frame after undoing a move, 1000 nodes | 0.1 ms | 10 ms |
 | Frame with 1000 packets on bent wires | 0.2 ms | 8 ms |
-| Route 1000 short wires | 12.1 ms | 50 ms |
-| Route 300 long wires among 200 nodes (worst case) | 94 ms | 600 ms |
-| Route 10 long wires across 1000 scattered nodes | 90 ms | 300 ms |
+| Route 1000 short wires | 10.4 ms | 50 ms |
+| Route 300 long wires among 200 nodes (worst case) | 92 ms | 600 ms |
+| Route 10 long wires across 1000 scattered nodes | 85 ms | 300 ms |
 | Remove 1000 nodes at once | 0.2 ms | 2 ms |
-| Auto-layout 1000 nodes | 0.5 ms | 5 ms |
-| Pull apart 300 nodes stacked on one spot | 85 ms | 400 ms |
+| Auto-layout 1000 nodes | 1 ms | 5 ms |
+| Pull apart 300 nodes stacked on one spot | 7.7 ms | 400 ms |
 | Frame rate while dragging or panning, 1000 nodes | 60 fps | 30 fps |
 | Frame rate with 2000 packets in flight | 60 fps | 30 fps |
+
+`bench/scale.bench.ts` runs the same scenarios on square grids of 1k, 10k and 100k nodes, and fails
+when a frame or an edit at 100k costs more than 1.5 times what it costs at 1k, plus 0.5 ms.
+
+| Scenario | 1k | 10k | 100k |
+| --- | --- | --- | --- |
+| Mount, whole graph fitted | 18 ms | 101 ms | 785 ms |
+| Frame while dragging a node, zoom 1 | 0.3 ms | 0.1 ms | 0.1 ms |
+| Frame while dragging 100 nodes, zoom 1 | 0.9 ms | 0.8 ms | 0.8 ms |
+| Arrow-key edit | 0.2 ms | 0.1 ms | 0.1 ms |
+| Undo of that edit | 0.1 ms | 0.1 ms | 0.1 ms |
+| Delete 100 selected nodes | 1 ms | 0.9 ms | 1 ms |
+| Pan at zoom 1 | 60 fps | 60 fps | 60 fps |
+| Pan with the whole graph fitted | 60 fps | 60 fps | 21 fps |
 
 ## Development
 
@@ -341,8 +442,8 @@ npx playwright install chromium   # once, for tests and benchmarks
 | `npm run bench` | Benchmarks with budgets |
 | `npm run build` | `dist/index.js`, `dist/index.d.ts`, `dist/style.css` |
 
-The demo has edit mode, undo, packets and an event log. Add `?n=1000` to the URL for a stress test
-with an fps counter.
+The demo has edit mode, undo, packets and an event log. Add `?n=1000` (or any count) to the URL for
+a stress test with an fps counter.
 
 If you change anything on a hot path, run `npm run bench` before and after. No row should get more
 than 5% slower, and if a number looks like noise, run it again.
@@ -359,13 +460,10 @@ The code follows a few rules:
 
 ## Known limits
 
-betternodes is built for graphs of up to a few thousand nodes. This table lists where it should
-slow down first as graphs grow, and what the next step would be.
-
-| Limit | When it starts to matter | Next step |
+| Limit | When it shows | Next step |
 | --- | --- | --- |
-| Route obstacles are scanned one by one | Around 2000 nodes | A spatial index for obstacles |
-| All wires are scanned when something changes | Around 5000 wires | An index from each node to its wires |
-| No crossing minimization in auto-layout | Dense, tangled graphs | A layered layout such as elkjs or dagre |
-| Undo stores whole snapshots | Very large graphs with deep history | Store inverse diffs |
-| Note placement checks every node per spot | Many notes on large graphs | Use the spatial hash for notes |
+| Software WebGL draws the wires of a fully fitted 100k-node graph slowly: 500k line segments a frame | 21 fps panning in headless Chromium; hardware WebGL wasn't measured | One straight line per wire when its stubs are under a pixel on screen |
+| Auto-layout measures each new node, so it mounts every node it lays out once | Auto-laying out tens of thousands of new nodes at once | Positions from `at()` or `load()`, or a size hint per node |
+| A wire's span uses its route once it has one; an unrouted wire that would detour around a very large node far out of view can be culled while the detour crosses the view | Nodes larger than the half-view margin | Grow spans by the largest node size |
+| Crossing reduction ignores wires that skip a column | Graphs with many long wires | A dummy node per skipped column |
+| Theme switches reach what canvases draw within half a second | Far zoom and the minimap | A `MutationObserver` on the root's classes, so `bn-dark` switches show at once |
