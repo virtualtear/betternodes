@@ -1,3 +1,5 @@
+import { fail } from './check'
+import { WORLD } from './geometry/rect'
 import type { Graph, GroupDef, NodeDef } from './model/graph'
 import type { View } from './view/view'
 
@@ -10,8 +12,12 @@ export class NodeBuilder {
     return this.set({ title: text })
   }
 
-  /** Places the node's top-left corner at world coordinates. */
+  /**
+   * Places the node's top-left corner at world coordinates.
+   * @throws if a coordinate is not a number within ±10,000,000.
+   */
   at(x: number, y: number) {
+    if (!(Math.abs(x) <= WORLD && Math.abs(y) <= WORLD)) fail(`position ${x}, ${y} is not within ±${WORLD}`)
     return this.set({ x, y, placed: true }, 'place')
   }
 

@@ -284,7 +284,7 @@ Returns a chainable builder for a new or existing node. Ids must not contain `.`
 | Method | Description |
 | --- | --- |
 | `.title(text)` | Title text; defaults to the id. |
-| `.at(x, y)` | Top-left corner in world px. Without it, auto-layout places the node. |
+| `.at(x, y)` | Top-left corner in world px, within ±10,000,000. Without it, auto-layout places the node. |
 | `.content(el)` | Custom element below the title. |
 | `.class(...names)` | Extra CSS classes, replacing earlier ones, e.g. `'error'`. |
 
@@ -367,7 +367,7 @@ fire in both modes whatever the options say. Pass `{ signal }` as the third argu
 | --- | --- |
 | `f.mode('view' \| 'edit')` | Switches modes. |
 | `f.set(options)` | Changes [options](#options). |
-| `f.state()` / `f.load(state)` | Saves or restores positions and wires. Invalid saved wires are dropped with a warning. |
+| `f.state()` / `f.load(state)` | Saves or restores positions and wires. Invalid saved wires, malformed entries and coordinates beyond ±10,000,000 are dropped with a warning; a state of the wrong shape changes nothing. |
 | `f.undo()` / `f.redo()` | Reverts or re-applies a user edit and emits `change`. |
 | `f.layout()` | Re-arranges every node now; emits no `change`. |
 | `f.fit(...ids)` | Fits these nodes, or all, into view. |

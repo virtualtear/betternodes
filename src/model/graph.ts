@@ -1,3 +1,4 @@
+import { WORLD } from '../geometry/rect'
 import { wireKey, type Edge, type State } from './state'
 
 /** A node as defined in code; x/y are world coordinates. */
@@ -36,6 +37,25 @@ export const nodeOf = (ref: string) => ref.split('.', 1)[0]
 /** Anchor name of a `'nodeId.anchor'` ref. */
 export const anchorOf = (ref: string) => ref.slice(ref.indexOf('.') + 1) as Anchor
 
+const warn = (message: string) => console.warn(`betternodes: dropped saved ${message}`)
+
+// Numbers are checked against WORLD, not just for being finite: JSON turns 1e309 into Infinity, and
+// coordinates beyond 2^53 stop grid loops from advancing.
+const isPosition = (v: unknown): v is [number, number] =>
+  Array.isArray(v) && v.length === 2 && v.every(c => typeof c === 'number' && Math.abs(c) <= WORLD)
+
+const isEdge = (v: unknown): v is Edge => Array.isArray(v) && v.length === 2 && v.every(end => typeof end === 'string')
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+// The entries that pass `ok`. One counted warning covers the rest, so a huge crafted list can't flood
+// the console.
+function valid<E, T extends E>(entries: E[], ok: (entry: E) => entry is T, what: string): T[] {
+  const out = entries.filter(ok)
+  if (out.length < entries.length) warn(`${what}: ${entries.length - out.length} malformed`)
+  return out
+}
+
 /** Pure graph model, no DOM. */
 export class Graph {
   readonly nodes = new Map<string, NodeDef>()
@@ -70,25 +90,40 @@ export class Graph {
     return this.edges.delete(wireKey(from, to))
   }
 
-  /** Trashes or restores nodes to match `state.removed`, moves known nodes and replaces all wires. */
-  load(state: State) {
+  /**
+   * Trashes or restores nodes to match `state.removed`, moves known nodes and replaces all wires.
+   * @remarks Saved state often comes from storage or a server, so it is checked before anything
+   * changes: a state of the wrong shape is ignored, malformed entries and coordinates beyond
+   * {@link WORLD} are dropped, each with a warning.
+   * @returns false if the state was ignored.
+   */
+  load(state: unknown) {
+    if (!isRecord(state) || !isRecord(state.positions) || !Array.isArray(state.edges)
+      || !(state.removed === undefined || Array.isArray(state.removed))) {
+      warn('state: not a { positions, edges, removed? } object')
+      return false
+    }
+    const removed = new Set(valid(state.removed ?? [], (id): id is string => typeof id === 'string', 'removed ids'))
+    const edges = valid(state.edges, isEdge, 'wires')
+    const positions = valid(Object.entries(state.positions), (e): e is [string, [number, number]] => isPosition(e[1]), 'positions')
+
     this.version++
-    const removed = new Set(state.removed)
     for (const id of removed) this.remove(id)
     for (const [id, n] of this.trash) {
       if (removed.has(id)) continue
       this.trash.delete(id)
       this.nodes.set(id, n)
     }
-    for (const [id, [x, y]] of Object.entries(state.positions)) {
+    for (const [id, [x, y]] of positions) {
       const n = this.nodes.get(id)
       if (n) Object.assign(n, { x, y, placed: true })
     }
     this.edges.clear()
-    for (const [from, to] of state.edges) {
+    for (const [from, to] of edges) {
       if (this.canConnect(from, to)) this.connect(from, to)
-      else console.warn(`betternodes: dropped saved wire ${from} -> ${to}`)
+      else warn(`wire ${from} -> ${to}`)
     }
+    return true
   }
 
   /** Moves a node to the trash and deletes its wires; returns false for an unknown id. */

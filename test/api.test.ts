@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vitest'
 import { page } from 'vitest/browser'
-import { flow } from '../src/index'
+import { flow, type State } from '../src/index'
 import { center, container, drag, frame } from './util'
 
 test('renders nodes in view mode by default', async () => {
@@ -141,6 +141,47 @@ test('load() with nothing saved keeps the code-defined graph', () => {
   const f = twoNodes()
   f.load(null)
   expect(f.state().edges).toEqual([['a.e', 'b.w']])
+})
+
+test('load() drops positions that are not finite or too far out, with a warning, and keeps rendering', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const f = flow(container())
+  for (const [i, id] of ['a', 'b', 'c', 'd', 'e'].entries()) f.node(id).at(i * 300, 0)
+  // As parsed from storage: JSON turns 1e309 into Infinity.
+  f.load(JSON.parse('{"positions":{"a":[1e309,0],"b":[3e18,0],"c":[0,"x"],"d":[1,2,3],"e":[40,200]},"edges":[]}'))
+  f.load({ positions: { a: [NaN, 0] }, edges: [] })
+  expect(f.state().positions).toEqual({ a: [0, 0], b: [300, 0], c: [600, 0], d: [900, 0], e: [40, 200] })
+  expect(warn.mock.calls).toEqual([['betternodes: dropped saved positions: 4 malformed'], ['betternodes: dropped saved positions: 1 malformed']])
+  // Such numbers used to make the spatial lookups of the next frame loop forever.
+  await frame()
+})
+
+test('load() keeps the valid rest of a malformed saved state instead of stopping halfway', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const f = twoNodes()
+  f.load(JSON.parse('{"positions":{"a":[10,20]},"edges":[["a.s","b.n"],["a.e"],[1,2],"x"],"removed":[3]}'))
+  expect(f.state()).toEqual({ positions: { a: [10, 20], b: [0, 0] }, edges: [['a.s', 'b.n']] })
+  expect(warn.mock.calls).toEqual([['betternodes: dropped saved removed ids: 1 malformed'], ['betternodes: dropped saved wires: 3 malformed']])
+})
+
+test('load() ignores a saved state of the wrong shape and keeps every wire', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const f = twoNodes()
+  for (const bad of ['x', [], { positions: [], edges: [] }, { positions: {}, edges: {} }, { positions: {}, edges: [], removed: 'b' }]) {
+    f.load(bad as unknown as State)
+  }
+  expect(f.state()).toEqual({ positions: { a: [0, 0], b: [0, 0] }, edges: [['a.e', 'b.w']] })
+  expect(warn).toHaveBeenCalledTimes(5)
+})
+
+test('at(), viewport() and zoomBy() reject numbers that are not finite or too far out', () => {
+  const f = flow(container())
+  expect(() => f.node('a').at(Infinity, 0)).toThrow()
+  expect(() => f.node('a').at(0, 1e8)).toThrow()
+  expect(() => f.viewport({ x: NaN })).toThrow()
+  expect(() => f.viewport({ zoom: 0 })).toThrow()
+  expect(() => f.zoomBy(-1)).toThrow()
+  expect(f.state().positions).toEqual({ a: [0, 0] })
 })
 
 test('class() sets status classes on a node, replacing earlier ones', async () => {

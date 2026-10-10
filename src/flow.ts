@@ -1,4 +1,5 @@
 import { GroupBuilder, NodeBuilder } from './builders'
+import { fail } from './check'
 import { Graph } from './model/graph'
 import { History } from './model/history'
 import { diff, wireKey, type State } from './model/state'
@@ -9,10 +10,6 @@ import { Packets, type SendOptions } from './view/packets/packets'
 import { View } from './view/view'
 
 const RIGHTS = ['connect', 'move', 'remove'] as const satisfies readonly (keyof Settings)[]
-
-const fail = (message: string): never => {
-  throw new Error(`betternodes: ${message}`)
-}
 
 /** A node graph mounted in a DOM element. Starts in view mode unless the `mode` option says otherwise. */
 export class Flow extends EventTarget {
@@ -171,12 +168,13 @@ export class Flow extends EventTarget {
 
   /**
    * Restores positions and wires saved from {@link Flow.state}; `null` is a no-op.
-   * @remarks Wires to nodes or anchors that no longer exist are dropped with a console warning.
+   * @remarks Wires to nodes or anchors that no longer exist are dropped with a console warning. So
+   * are malformed entries, e.g. from a corrupted save; a state of the wrong shape changes nothing.
    */
   load(state: State | null | undefined) {
     if (!state) return this
     const shown = new Set(this.graph.nodes.keys())
-    this.graph.load(state)
+    if (!this.graph.load(state)) return this
     for (const id of shown) if (!this.graph.nodes.has(id)) this.view.drop(id)
     // Restored nodes need their element rebuilt; the rest only move.
     for (const id of this.graph.nodes.keys()) {
@@ -252,17 +250,26 @@ export class Flow extends EventTarget {
   /**
    * Pans and zooms; fields left out keep their value. Cancels the fit of the first render, so a
    * saved viewport can be restored right after mounting.
+   * @throws if a number is not finite, or the zoom is not above 0.
    */
   viewport(next: Partial<Viewport>): this
   viewport(next?: Partial<Viewport>) {
     const { x, y, k } = this.view
     if (!next) return { x, y, zoom: k }
-    this.view.viewport(next.x ?? x, next.y ?? y, next.zoom ?? k)
+    const [nx, ny, zoom] = [next.x ?? x, next.y ?? y, next.zoom ?? k]
+    if (!Number.isFinite(nx) || !Number.isFinite(ny) || !(Number.isFinite(zoom) && zoom > 0)) {
+      fail(`invalid viewport ${nx}, ${ny} at zoom ${zoom}`)
+    }
+    this.view.viewport(nx, ny, zoom)
     return this
   }
 
-  /** Zooms by `factor` (e.g. 1.2 in, 1 / 1.2 out) around the middle of the view, within the zoom options. */
+  /**
+   * Zooms by `factor` (e.g. 1.2 in, 1 / 1.2 out) around the middle of the view, within the zoom options.
+   * @throws if `factor` is not a finite number above 0.
+   */
   zoomBy(factor: number) {
+    if (!(Number.isFinite(factor) && factor > 0)) fail(`invalid zoom factor ${factor}`)
     this.view.zoomAt(this.root.clientWidth / 2, this.root.clientHeight / 2, this.view.k * factor)
     return this
   }
