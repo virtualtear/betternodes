@@ -373,6 +373,30 @@ test('updating a node from code keeps focus inside its custom content', async ()
   expect(document.activeElement).toBe(input)
 })
 
+test('changing a node\'s title from code keeps focus inside its custom content', async () => {
+  const el = container()
+  const f = flow(el)
+  const input = document.createElement('input')
+  f.node('a').content(input)
+  await frame()
+  input.focus()
+  f.node('a').title('Running') // e.g. a live status while the user types
+  await frame()
+  expect(document.activeElement).toBe(input)
+  expect(el.querySelector('[data-node="a"] .bn-title')!.textContent).toBe('Running')
+})
+
+test('content() swaps the custom content', async () => {
+  const el = container()
+  const f = flow(el)
+  const [one, two] = [document.createElement('p'), document.createElement('p')]
+  f.node('a').content(one)
+  await frame()
+  f.node('a').content(two)
+  await frame()
+  expect([one.isConnected, two.parentElement?.dataset.node]).toEqual([false, 'a'])
+})
+
 test('mode() switches between edit and view', () => {
   const el = container()
   const f = flow(el).mode('edit')

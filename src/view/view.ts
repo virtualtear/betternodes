@@ -50,6 +50,8 @@ export class View {
   private readonly wires: Wires
   private readonly groups: Groups
   private readonly els = new Map<string, HTMLElement>()
+  // Custom content each node element shows, so a re-render can tell whether it changed.
+  private readonly contents = new Map<string, HTMLElement>()
   // Node border-box sizes in world px.
   private readonly sizes = new Map<string, Point>()
   // Nodes needing a full rebuild, a position and class update, and a re-measure on the next frame.
@@ -116,6 +118,7 @@ export class View {
     this.mini?.drop(id)
     if (this.graph.memberOf.has(id)) this.regroup = true
     this.els.delete(id)
+    this.contents.delete(id)
     this.sizes.delete(id)
     for (const set of [this.dirty, this.moved, this.stale]) set.delete(id)
     if (this.selected.nodes.has(id)) this.select([...this.selected.nodes].filter(other => other !== id))
@@ -370,11 +373,23 @@ export class View {
     if (!el) {
       el = h('div', 'bn-node')
       el.dataset.node = n.id
+      el.append(h('div', 'bn-title'), ...anchorDots(n.id))
       this.els.set(n.id, el)
       this.world.append(el)
       this.resize.observe(el)
     }
-    el.replaceChildren(h('div', 'bn-title', n.title), ...(n.content ? [n.content] : []), ...anchorDots(n.id))
+    // Changed in place: re-inserting the content would take focus away from an input inside it.
+    const title = el.firstElementChild!
+    if (title.textContent !== n.title) title.textContent = n.title
+    const shown = this.contents.get(n.id)
+    if (shown !== n.content) {
+      // Unless the host moved it into another node meanwhile.
+      if (shown?.parentElement === el) shown.remove()
+      if (n.content) {
+        title.after(n.content)
+        this.contents.set(n.id, n.content)
+      } else this.contents.delete(n.id)
+    }
     this.moved.add(n.id)
     this.stale.add(n.id)
   }
