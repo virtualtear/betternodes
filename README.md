@@ -280,7 +280,7 @@ of 0 or more. Edit rights that are off show in a `data-lock` attribute on the ro
 
 ### Nodes: `f.node(id)`
 
-Returns a chainable builder for a new or existing node. Ids must not contain `.`.
+Returns a chainable builder for a new or existing node. Ids must not contain `.` or `>`.
 
 | Method | Description |
 | --- | --- |

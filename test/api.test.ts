@@ -105,8 +105,10 @@ test('remove() throws for an unknown node', () => {
   expect(() => flow(container()).remove('x')).toThrow()
 })
 
-test('node ids must not contain a dot', () => {
+test('node ids must not contain "." or ">", which separate anchors and wire ends', () => {
   expect(() => flow(container()).node('a.b')).toThrow()
+  // Otherwise the wires a -> b>c and a>b -> c would share the key "a>b>c".
+  expect(() => flow(container()).node('a>b')).toThrow()
 })
 
 test('at() sets the position reported in state', () => {

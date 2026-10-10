@@ -69,9 +69,10 @@ export class Flow extends EventTarget {
    * Defines a node, or returns a builder for an existing one.
    * @remarks For a node the user deleted it returns a builder for the stored definition without
    * bringing the node back; only undo or `load()` restore it.
+   * @throws if `id` contains `.` (it separates the anchor) or `>` (it separates wire ends in keys).
    */
   node(id: string) {
-    if (id.includes('.')) fail(`node id "${id}" must not contain "."`)
+    if (/[.>]/.test(id)) fail(`node id "${id}" must not contain "." or ">"`)
     let def = this.graph.nodes.get(id) ?? this.graph.trash.get(id)
     if (!def) {
       def = { id, title: id, x: 0, y: 0 }

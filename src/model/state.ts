@@ -21,7 +21,7 @@ export interface Diff {
   nodesRestored: string[]
 }
 
-/** Map key of the wire from `from` to `to`. */
+/** Map key of the wire from `from` to `to`; unique because node ids contain no `>`. */
 export const wireKey = (from: string, to: string) => `${from}>${to}`
 
 const without = <T>(items: Iterable<T>, drop: Set<T>) => [...items].filter(item => !drop.has(item))
