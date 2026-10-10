@@ -268,7 +268,8 @@ export class View {
     for (const id of this.dirty) this.renderNode(this.graph.nodes.get(id)!)
     for (const id of this.moved) this.renderPlace(this.graph.nodes.get(id)!)
     for (const id of this.stale) if (this.measure(id)) this.moved.add(id)
-    this.autoLayout()
+    // Unplaced nodes are always stale: node() and relayout() both mark them.
+    if (this.stale.size) this.autoLayout()
     this.pullApart()
     if (this.regroup || this.moved.size) {
       this.regroup = false
