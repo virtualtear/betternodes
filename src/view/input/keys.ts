@@ -48,10 +48,7 @@ function removeSelected({ view, graph, ops }: Input) {
   // Cleared first, so drop() doesn't shrink the selection one node (and event) at a time.
   view.select()
   if (edge) graph.disconnect(...edge)
-  for (const id of nodes) {
-    graph.remove(id)
-    view.drop(id)
-  }
+  for (const id of graph.remove(nodes)) view.drop(id)
   ops.changed(before)
   return true
 }

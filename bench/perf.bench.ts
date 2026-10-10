@@ -109,6 +109,7 @@ test('route: 10 wires across 1000 scattered nodes', async () => {
 test('remove: 1000 nodes at once', async () => {
   const ids = Array.from({ length: 1000 }, (_, i) => `n${i}`)
   await measure('remove: 1000 nodes at once (999 wires)', {
+    budget: 2,
     setup: () => {
       const graph = new Graph()
       for (const id of ids) graph.nodes.set(id, { id, title: '', x: 0, y: 0 } as NodeDef)
@@ -116,7 +117,7 @@ test('remove: 1000 nodes at once', async () => {
       return graph
     },
     run: graph => {
-      for (const id of ids) graph.remove(id)
+      graph.remove(ids)
     },
   })
 })

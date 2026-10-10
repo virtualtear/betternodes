@@ -86,8 +86,10 @@ export class Graph {
 
   /** @returns false if there was no such wire. */
   disconnect(from: string, to: string) {
-    this.version++
-    return this.edges.delete(wireKey(from, to))
+    const had = this.edges.delete(wireKey(from, to))
+    // Only real changes: a bump makes the next frame re-check every wire.
+    if (had) this.version++
+    return had
   }
 
   /**
@@ -108,7 +110,7 @@ export class Graph {
     const positions = valid(Object.entries(state.positions), (e): e is [string, [number, number]] => isPosition(e[1]), 'positions')
 
     this.version++
-    for (const id of removed) this.remove(id)
+    this.remove(removed)
     for (const [id, n] of this.trash) {
       if (removed.has(id)) continue
       this.trash.delete(id)
@@ -126,15 +128,23 @@ export class Graph {
     return true
   }
 
-  /** Moves a node to the trash and deletes its wires; returns false for an unknown id. */
-  remove(id: string) {
-    const n = this.nodes.get(id)
-    if (!n) return false
-    this.nodes.delete(id)
-    this.trash.set(id, n)
+  /**
+   * Moves nodes to the trash and deletes their wires, in one pass over the wires however many go.
+   * @returns the ids that were nodes; unknown ones are skipped.
+   */
+  remove(ids: Iterable<string>) {
+    const gone = new Set<string>()
+    for (const id of ids) {
+      const n = this.nodes.get(id)
+      if (!n) continue
+      this.nodes.delete(id)
+      this.trash.set(id, n)
+      gone.add(id)
+    }
+    if (!gone.size) return gone
     this.version++
-    for (const [key, [from, to]] of this.edges) if (nodeOf(from) === id || nodeOf(to) === id) this.edges.delete(key)
-    return true
+    for (const [key, [from, to]] of this.edges) if (gone.has(nodeOf(from)) || gone.has(nodeOf(to))) this.edges.delete(key)
+    return gone
   }
 
   /** Sets the note on a wire; no text removes it. */

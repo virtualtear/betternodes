@@ -164,7 +164,7 @@ export class Flow extends EventTarget {
    * @throws if there is no such node.
    */
   remove(id: string) {
-    if (!this.graph.remove(id)) fail(`no node "${id}"`)
+    if (!this.graph.remove([id]).size) fail(`no node "${id}"`)
     this.view.drop(id)
     return this
   }
