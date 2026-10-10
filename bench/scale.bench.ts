@@ -148,8 +148,8 @@ for (const n of SIZES) {
   })
 }
 
-// The goal: what a frame or an edit costs doesn't depend on how many nodes there are.
-test.fails('scale: frame and edit costs at the largest size stay close to the smallest', () => {
+// What a frame or an edit costs doesn't depend on how many nodes there are.
+test('scale: frame and edit costs at the largest size stay close to the smallest', () => {
   const [small, large] = [medians.get(SIZES[0])!, medians.get(SIZES[SIZES.length - 1])!]
   for (const key of Object.keys(small)) expect(large[key], key).toBeLessThanOrEqual(small[key] * 1.5 + 0.5)
 })

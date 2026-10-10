@@ -78,8 +78,8 @@ export class Graph {
   readonly groups = new Map<string, GroupDef>()
   /** Group id per node id, so a node is in at most one group. Kept for deleted nodes too. */
   readonly memberOf = new Map<string, string>()
-  /** Bumped on every change to wires or nodes, so derived lookups know when to rebuild. */
-  version = 0
+  /** Keys of wires added, deleted, noted or classed since the view last took them. */
+  readonly dirty = new Set<WireKey>()
   // The wires at each node, in or out, so a node's wires are found without walking all of them.
   private readonly at = new Map<string, Set<WireKey>>()
   // Member ids per group, the reverse of memberOf.
@@ -114,8 +114,8 @@ export class Graph {
     this.edges.set(key, edge)
     this.link(nodeOf(from), key)
     this.link(nodeOf(to), key)
+    this.dirty.add(key)
     journal?.connected(key, edge)
-    this.version++
   }
 
   /**
@@ -128,8 +128,6 @@ export class Graph {
     if (!edge) return false
     this.unlink(key)
     journal?.disconnected(key, edge)
-    // Only real changes: a bump makes the next frame re-check every wire.
-    this.version++
     return true
   }
 
@@ -150,13 +148,13 @@ export class Graph {
     const edges = valid(state.edges, isEdge, 'wires')
     const positions = valid(Object.entries(state.positions), (e): e is [string, [number, number]] => isPosition(e[1]), 'positions')
 
-    this.version++
     this.remove(removed)
     this.restore([...this.trash.keys()].filter(id => !removed.has(id)))
     for (const [id, [x, y]] of positions) {
       const n = this.nodes.get(id)
       if (n) Object.assign(n, { x, y, placed: true })
     }
+    for (const key of this.edges.keys()) this.dirty.add(key)
     this.edges.clear()
     this.at.clear()
     for (const [from, to] of edges) {
@@ -186,13 +184,13 @@ export class Graph {
         const edge = this.edges.get(key)
         if (!edge) continue // deleted from its other end already
         this.edges.delete(key)
+        this.dirty.add(key)
         journal?.disconnected(key, edge)
         const far = nodeOf(edge[0]) === id ? nodeOf(edge[1]) : nodeOf(edge[0])
         if (!gone.has(far)) this.at.get(far)?.delete(key)
       }
       this.at.delete(id)
     }
-    if (gone.size) this.version++
     return gone
   }
 
@@ -210,7 +208,6 @@ export class Graph {
       back.add(id)
       journal?.restored(id)
     }
-    if (back.size) this.version++
     return back
   }
 
@@ -269,6 +266,7 @@ export class Graph {
     const edge = this.edges.get(key)
     if (!edge) return false
     this.edges.delete(key)
+    this.dirty.add(key)
     this.at.get(nodeOf(edge[0]))?.delete(key)
     this.at.get(nodeOf(edge[1]))?.delete(key)
     return true
@@ -282,6 +280,6 @@ export class Graph {
   private patch<V>(map: Map<WireKey, V>, key: WireKey, value: V | undefined) {
     if (value === undefined) map.delete(key)
     else map.set(key, value)
-    this.version++
+    this.dirty.add(key)
   }
 }

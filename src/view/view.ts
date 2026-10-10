@@ -18,6 +18,8 @@ import { Wires } from './wires'
 const FIT_PAD = 40
 // Size assumed for a node that has no element to measure, until any node has been measured.
 const GUESS: Readonly<Point> = [160, 40]
+// Mount area while the root has no size yet: nothing meets it.
+const NOWHERE: Rect = [0, 0, 0, 0]
 
 /** Renders a graph into a root element, batching DOM writes into one animation frame. */
 export class View {
@@ -330,7 +332,7 @@ export class View {
     }
     this.toggleMinimap()
     this.mini?.render(this.moved, this.panned || fitted)
-    this.wires.render(this.shifted, this.dragging)
+    this.wires.render(this.shifted, this.dragging, this.settings.virtual ? this.area ?? NOWHERE : undefined)
     this.renderOverlays()
     this.dirty.clear()
     this.moved.clear()

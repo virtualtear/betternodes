@@ -39,11 +39,14 @@ function simplify(points: Point[]) {
   return out
 }
 
+/** How far around its ends a wire looks for obstacles: both full-length stubs plus a margin. */
+export const MARGIN = STUB + REGION + CLEAR
+
 /**
  * The area a wire from `a` to `b` is routed in: obstacles outside it are ignored.
- * @remarks Spans both full-length stubs plus a margin, so it holds every node a stub can hit.
+ * @remarks It holds every node a stub can hit.
  */
-export const reach = (a: Point, b: Point) => inflate(bounds([a, b]), STUB + REGION + CLEAR)
+export const reach = (a: Point, b: Point) => inflate(bounds([a, b]), MARGIN)
 
 /**
  * Waypoints of a right-angled wire from `a` to `b` that avoids `obstacles`.

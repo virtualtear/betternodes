@@ -46,3 +46,19 @@ test('a node keeps its element while it holds focus, even out of view', async ()
   expect(shown()).toContain('n1')
   expect(el.contains(input)).toBe(true)
 })
+
+test('only wires near the view have elements, and turning culling off brings all of them', async () => {
+  const { el, f } = await row()
+  const wires = () => [...el.querySelectorAll<SVGGElement>('g[data-wire]')].map(g => g.dataset.wire)
+  // A wire's span reaches 130px past its nodes, so n4 -> n5 at x 1200 is in, n5 -> n6 is not.
+  expect(wires()).toEqual(['n0.e>n1.w', 'n1.e>n2.w', 'n2.e>n3.w', 'n3.e>n4.w', 'n4.e>n5.w'])
+  f.set({ virtual: false })
+  await frame()
+  expect(wires()).toHaveLength(39)
+})
+
+test('a packet travels along wires that have no element', async () => {
+  const { f } = await row()
+  // n30 to n33 lies far right of the view: no element, so the wires get routes just for the packet.
+  expect(await f.send('n30', 'n33', { speed: 2400 })).toEqual(['n33'])
+})
