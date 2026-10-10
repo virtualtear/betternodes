@@ -420,6 +420,22 @@ test('destroy() leaves the container as it found it and stops listening', async 
   expect(wheel.defaultPrevented).toBe(false)
 })
 
+test('layout() and send() after destroy() change nothing, and the send settles', async () => {
+  const el = container()
+  const before = el.outerHTML
+  const f = flow(el)
+  f.node('a')
+  f.node('b')
+  f.connect('a', 'b')
+  await frame()
+  f.destroy()
+  const saved = f.state()
+  f.layout()
+  await expect(f.send('a', 'b')).resolves.toEqual([])
+  await frame()
+  expect([el.outerHTML, f.state()]).toEqual([before, saved])
+})
+
 test('select() replaces the selection and fires select', async () => {
   const el = container()
   const f = flow(el)

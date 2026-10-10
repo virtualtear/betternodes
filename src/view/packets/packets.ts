@@ -54,6 +54,8 @@ export class Packets {
 
   /** Starts a send; resolves with the ids of the nodes its packets arrived at. */
   send(from: string, to: string | undefined, opts: SendOptions) {
+    // Without frames no packet would move, and the promise would never settle.
+    if (this.view.destroyed) return Promise.resolve([])
     return new Promise<string[]>(done => {
       const send: Send = { to, used: new Set(), opts, arrived: [], live: 1, done } // holds 1 until departure is set up
       this.depart(send, from)

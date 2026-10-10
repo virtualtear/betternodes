@@ -287,7 +287,8 @@ export class Flow extends EventTarget {
    * @remarks With `to`, it travels there over the fewest hops, picking each next wire when it gets
    * to a node, so edits made meanwhile are respected; it resolves `[to]`, or `[]` if no route is
    * left. Without `to` it flows: copies follow every outgoing wire (each wire once per send) and it
-   * resolves with the end nodes reached, those without outgoing wires. Emits no `change`.
+   * resolves with the end nodes reached, those without outgoing wires. Emits no `change`. After
+   * {@link Flow.destroy} it resolves `[]` right away.
    * @throws if `from` or `to` is not a node, `class` is not one class name, or `speed` is not a
    * finite number above 0.
    */

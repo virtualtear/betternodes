@@ -37,6 +37,8 @@ export class View {
   onFrame?: (now: number) => void
   /** Runs once per frame in which the pan offset or zoom changed. */
   onViewport?: () => void
+  /** Set by {@link View.destroy}; a destroyed view runs no more frames. */
+  destroyed = false
 
   private readonly world = h('div', 'bn-world')
   private readonly svg = svg('svg', 'bn-wires')
@@ -104,7 +106,7 @@ export class View {
     root.style.removeProperty('background-size')
     if (!root.style.length) root.removeAttribute('style')
     cancelAnimationFrame(this.frame)
-    this.queued = true // blocks any later frame from touching the detached DOM
+    this.destroyed = true
   }
 
   /** Removes a deleted node's element; its wires disappear with the next frame's reconcile. */
@@ -169,6 +171,7 @@ export class View {
 
   /** Re-runs auto-layout for every node now, with freshly measured sizes. */
   relayout() {
+    if (this.destroyed) return
     for (const n of this.graph.nodes.values()) {
       n.placed = false
       this.stale.add(n.id)
@@ -186,7 +189,7 @@ export class View {
 
   /** Schedules a frame; wires are reconciled against the graph on every frame. */
   update() {
-    if (this.queued) return
+    if (this.queued || this.destroyed) return
     this.queued = true
     this.frame = requestAnimationFrame(now => this.flush(now))
   }
