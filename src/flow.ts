@@ -176,13 +176,17 @@ export class Flow extends EventTarget {
    */
   load(state: State | null | undefined) {
     if (!state) return this
-    const shown = new Set(this.graph.nodes.keys())
+    // Where each shown node was: only nodes that came back or moved need work, since every node
+    // handed to the view re-routes its wires on the next frame.
+    const was = new Map<string, [x: number, y: number]>()
+    for (const n of this.graph.nodes.values()) was.set(n.id, [n.x, n.y])
     if (!this.graph.load(state)) return this
-    for (const id of shown) if (!this.graph.nodes.has(id)) this.view.drop(id)
-    // Restored nodes need their element rebuilt; the rest only move.
-    for (const id of this.graph.nodes.keys()) {
-      if (shown.has(id)) this.view.place(id)
-      else this.view.mark(id)
+    for (const id of was.keys()) if (!this.graph.nodes.has(id)) this.view.drop(id)
+    for (const n of this.graph.nodes.values()) {
+      const old = was.get(n.id)
+      // Restored nodes need their element rebuilt; moved ones only a new position.
+      if (!old) this.view.mark(n.id)
+      else if (old[0] !== n.x || old[1] !== n.y) this.view.place(n.id)
     }
     return this
   }

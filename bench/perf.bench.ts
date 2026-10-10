@@ -210,7 +210,7 @@ test('frames on a 1000-node graph', async () => {
   // Undo of a one-node move: only that node and its wires should need work.
   const internals = f as unknown as Internals
   await measure('frame: undo of a one-node move (1000 nodes)', {
-    budget: 100,
+    budget: 10,
     runs: 30,
     setup: () => {
       const before = f.state()
