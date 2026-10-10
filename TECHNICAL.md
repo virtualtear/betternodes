@@ -1,49 +1,28 @@
 # How betternodes works
 
-This file explains how betternodes is built and why it is built that way.
+These notes explain how betternodes is put together and why. They are for anyone who wants to
+change the code, or who wonders why the library behaves the way it does. The public API is in the
+[README](README.md).
 
-**How to read it:** every section starts with an **In short** line. Read only those for a
-two-minute tour, and open a section when you want the details.
+## The main ideas
 
-## Contents
+Nodes are plain HTML elements and wires are SVG paths. There is no framework underneath and no
+runtime dependency, so the library works in any page.
 
-1. [The short version](#1-the-short-version)
-2. [Tech stack](#2-tech-stack)
-3. [Layers and folders](#3-layers-and-folders)
-4. [The frame loop](#4-the-frame-loop)
-5. [Data model](#5-data-model)
-6. [Undo and redo](#6-undo-and-redo)
-7. [Wire routing](#7-wire-routing)
-8. [Redrawing only what changed](#8-redrawing-only-what-changed)
-9. [The spatial hash](#9-the-spatial-hash)
-10. [Layout and overlaps](#10-layout-and-overlaps)
-11. [Packets](#11-packets)
-12. [Input and safety](#12-input-and-safety)
-13. [Testing and benchmarks](#13-testing-and-benchmarks)
-14. [Development](#14-development)
-15. [Known limits](#15-known-limits)
+All DOM work waits for the next animation frame, and inside that frame every write happens before
+any read. A frame only touches what changed: dragging a node re-routes the wires near it and leaves
+the others alone.
 
----
+Routing tries cheap shapes before it searches. Straight, L and Z shapes cover most wires, and the
+A* search that handles the rest has a hard cap on its work.
 
-## 1. The short version
+Node definitions live in your code. The editor state only holds what users can change, which keeps
+it small enough to save as JSON. Anything that comes in from outside, whether a saved state or an
+API argument, is checked before it touches the graph.
 
-> **In short:** plain DOM and SVG, one batched frame, cheap work first, bounded work always.
+Every hot path has a benchmark with a time budget, and the benchmarks run in a real browser.
 
-- **No framework, no dependencies.** Nodes are HTML elements, wires are SVG paths. It works anywhere.
-- **One frame at a time.** Every change waits for the next animation frame, so the browser lays
-  out once per frame.
-- **Do only what changed.** A drag re-routes only the wires near the moving node.
-- **Cheap first, expensive last.** Most wires are straight, L or Z shapes. A* runs only when those
-  are blocked.
-- **Your code owns the graph.** The editor state is only what users can change, as small JSON.
-- **Every input is checked where it enters.** Bad saved data cannot hang the tab.
-- **Measured, not guessed.** Every hot path has a benchmark with a time budget.
-
----
-
-## 2. Tech stack
-
-> **In short:** TypeScript and browser APIs only. Tests run in a real browser.
+## Stack
 
 | Part | Tool |
 | --- | --- |
@@ -52,16 +31,14 @@ two-minute tour, and open a section when you want the details.
 | Build | Vite 8 library mode, `tsc` for type declarations |
 | Tests and benchmarks | Vitest 5 browser mode, headless Chromium through Playwright |
 
-**Why no dependencies?**
-- A graph editor is often embedded in a larger app. Every dependency adds size and a chance of
-  version conflicts for that app.
-- The few hard parts (routing, layout, spatial hashing) are small enough to own and tune.
+A graph editor is often embedded in a larger app, and every dependency would add size and a chance
+of version conflicts to that app. The hard parts (routing, layout, spatial hashing) are small
+enough to own and tune by hand.
 
----
+## Layers
 
-## 3. Layers and folders
-
-> **In short:** four layers that only import downward. Only `view/` touches the DOM.
+The code is split into four layers, and each one only imports from the layers below it. Only
+`view/` touches the DOM.
 
 ```mermaid
 flowchart LR
@@ -95,25 +72,25 @@ bench/              benchmarks with budgets
 index.html          demo page
 ```
 
-**Why layers?**
-- `model/` and `geometry/` are pure functions and data. They run and test without a DOM.
-- The hard algorithms (routing, layout) never depend on rendering details, so they can change
-  independently.
+`model/` and `geometry/` are plain data and functions, so they run and test without a DOM. Routing
+and layout know nothing about rendering, which lets either side change without the other.
 
----
+## The frame loop
 
-## 4. The frame loop
+Reading layout, for example with `getBoundingClientRect()`, right after a DOM write forces the
+browser to lay out the page on the spot. A frame that mixes reads and writes across 1000 nodes can
+end up doing 1000 layouts instead of one. This is usually called layout thrashing, and the frame
+loop exists to avoid it.
 
-> **In short:** changes only mark work as due. One `requestAnimationFrame` does all of it: writes
-> first, then reads, then placement.
+Calls like `node()`, `place()` or a drag don't touch the DOM. They add the node's id to one of
+three sets:
 
-**The problem it solves**
-- Reading layout (for example `getBoundingClientRect()`) right after a DOM write forces the browser
-  to lay out the page immediately.
-- Mixing reads and writes over 1000 nodes means 1000 layouts in one frame. This is called layout
-  thrashing.
+- `dirty`: rebuild the node (title, content, anchors)
+- `moved`: update its position and classes
+- `stale`: measure its size again
 
-**How it works**
+Then they call `update()`, which schedules one `requestAnimationFrame` however many changes come in
+before it runs. A `ResizeObserver` also marks nodes as stale when their content grows.
 
 ```mermaid
 flowchart LR
@@ -125,30 +102,19 @@ flowchart LR
   F --> G[Draw: wires, overlays, packets]
 ```
 
-- Calls like `node()`, `place()` or a drag only add ids to one of three sets:
-  - `dirty`: rebuild the node (title, content, anchors)
-  - `moved`: update position and classes
-  - `stale`: measure the size again
-- `update()` schedules one frame. Many changes in one tick still cause one frame.
-- The frame runs all writes, then all reads, then placement. Nothing reads layout after that,
-  so the browser lays out once.
-- A `ResizeObserver` marks nodes stale when their content grows.
+The frame does all of its writes first, then measures the stale nodes, then places them and draws
+wires, overlays and packets. Nothing reads layout after the measuring step, so the browser lays out
+once per frame.
 
-**Small details that matter**
-- Panning changes one CSS transform on the world element. No node is touched.
-- Below 50% zoom a `bn-far` class hides anchors. Thousands of tiny anchors slowed panning down.
-- When nothing changes, no frame runs at all. An idle graph costs nothing.
+Panning changes a single CSS transform on the world element and leaves the nodes alone. Below 50%
+zoom, a `bn-far` class hides the anchors: they are too small to grab at that size, and thousands of
+them on screen slow panning down. When nothing changes, no frame runs at all.
 
----
+## Graph and state
 
-## 5. Data model
+Your code and the editor own different parts of the graph:
 
-> **In short:** node definitions live in your code. The editor state holds only what users can
-> change: positions, wires and deleted nodes.
-
-**What is where**
-
-| Owned by your code | Owned by the editor state |
+| Your code | The editor state |
 | --- | --- |
 | Titles, content, node classes | Node positions |
 | Wire notes and wire classes | Wires |
@@ -162,206 +128,150 @@ type State = {
 }
 ```
 
-**Why split it this way?**
-- Your code stays the single source of truth for what a node *is*.
-- The saved state stays small and plain JSON, easy to store anywhere.
-- `change` gives the full state and a `Diff`, so a server can save only what changed.
-- `change` fires only for user edits, never for your own calls. Saving on `change` cannot loop.
+Your code stays the single source of truth for what a node is, and the saved state stays small,
+plain JSON. Each `change` event carries the full state and a `Diff`, so a server can store just
+what changed. `change` only fires for user edits, never for your own calls, so saving on `change`
+can't start a loop.
 
-**Refs and keys**
-- A wire end is `'node.anchor'` or `'node'`. The first `.` splits the two parts.
-- A wire's map key is `'from>to'`.
-- That is why node ids cannot contain `.` or `>`. Otherwise `a` + `b>c` and `a>b` + `c` would
-  share one key.
+A wire end is written as `'node.anchor'` or just `'node'` and split at the first dot. A wire's key
+in the graph's maps is `'from>to'`. That's why node ids can't contain `.` or `>`: with `>` allowed,
+a wire from `a` to `b>c` and one from `a>b` to `c` would get the same key.
 
-**Version counter**
-- `Graph.version` increases on every structural change, such as adding or removing a wire.
-- The renderer compares it with the last frame. Same version and nothing moved means nothing to do.
+`Graph.version` goes up on every structural change, such as adding or removing a wire. The renderer
+compares it with the version it last drew. If it's the same and nothing moved, there is no wire
+work to do.
 
----
+## Undo
 
-## 6. Undo and redo
+Before each user edit, the current `State` goes onto a stack that holds up to `history` entries
+(100 by default). Undo and redo load a snapshot through the same checked `load()` path that saved
+data uses, and only the nodes whose position changed get placed again. On a 1000-node graph,
+undoing a one-node move takes 2.8 ms. Each arrow-key press is its own undo step.
 
-> **In short:** each user edit stores the whole state from before it. Undo loads it back.
+Snapshots are stored whole rather than as diffs because a snapshot is always correct. Diffs would
+need an inverse for every kind of edit, and each inverse is one more place for a bug. The price is
+memory, roughly `history` times the size of one state.
 
-**How it works**
-- Before each edit, the current `State` is pushed onto a stack, up to `history` entries (100 by
-  default).
-- Undo and redo go through the same validated `load()` path as saved data.
-- After a load, only nodes whose position changed are placed again. Undo of a one-node move takes
-  2.8 ms on a 1000-node graph.
-- Every arrow-key press is its own undo step.
+## Routing wires
 
-**Why whole snapshots and not diffs?**
-- A snapshot is always correct. Diffs need an inverse for every kind of edit, and each one is a
-  chance for a bug.
-- The cost is memory: about `history` times the size of one state.
+A wire is routed in these steps:
 
----
+1. It leaves its anchor in a straight 20px stub, shorter if a neighbour is close.
+2. Only nodes in a region around the wire count as obstacles.
+3. Five cheap shapes are tested: straight, two L shapes and two Z shapes. The cheapest one that
+   isn't blocked wins.
+4. If all five are blocked, an A* search looks for a way around.
+5. Steps 3 and 4 run first with 10px of space around each node, then again with 2px if nothing
+   fits.
+6. If that fails too, the wire is drawn as a simple Z shape that may pass behind a node. A wire is
+   always drawn.
 
-## 7. Wire routing
+A route costs its length plus 40px for every bend, which favours fewer, longer segments.
 
-> **In short:** try five cheap shapes first. Only when all of them are blocked, run a capped A*
-> search. If that fails too, draw a simple Z shape.
+The A* search runs on a sparse grid whose lines only go through node edges, the two stub ends and
+the midpoint between them, so the grid stays small. A search state is a grid point plus a direction
+of travel, which lets turns cost extra. The estimate of the remaining cost adds the bends any path
+still needs to the distance. With no obstacles in the way that estimate is exact, so A* still finds
+the cheapest route while exploring far fewer states. The search gives up after 8000 steps, which
+keeps the slowest wire to roughly one frame. A grid of more than about 4 million cells isn't
+searched at all, and the Z fallback is used instead.
 
-**Step by step**
-1. **Stubs.** The wire leaves its anchor straight for 20px, less when a neighbour is close.
-2. **Nearby obstacles only.** Only nodes in a region around the wire count.
-3. **Cheap shapes.** Straight, two L shapes and two Z shapes are tested. The cheapest one that is
-   not blocked wins.
-4. **A\* search.** Runs only when all five shapes are blocked.
-5. **Less clearance.** Steps 3 and 4 run first with 10px of space around nodes, then with 2px.
-6. **Fallback.** A Z shape, which may pass behind a node. The wire is always drawn.
+A search can reach about 24,000 states at most, however big its grid is. All searches therefore
+share one table with 65,536 slots, about 1.4 MB, instead of allocating arrays the size of the grid.
+For one long wire across 1000 scattered nodes, grid-sized arrays would take 143 MB and 70 ms just
+to fill. Each search gets an id, and a slot written by an older search counts as empty, so the
+table is never cleared between searches. Small grids use the state number directly as the slot;
+larger ones use Fibonacci hashing with linear probing.
 
-**Cost of a route**
-- Length plus 40px per bend. Fewer, longer segments look calmer than many short ones.
+Wires that would run on top of each other are spread into lanes side by side, up to 6px apart.
+Only the middle segments move, so wires still start and end exactly on their anchors. The whole
+spread stays inside the clearance band, so no lane touches a node.
 
-**The A\* search**
-- The grid is sparse. Its lines run only through node edges, the stub ends and their midpoint, so
-  the grid stays small.
-- A search state is a grid point plus a travel direction. That is how bends can cost extra.
-- The estimate of the remaining cost counts distance plus the bends any path still needs. Without
-  obstacles it is exact, so A* still finds the cheapest route but explores far fewer states.
-- It stops after 8000 steps, which keeps the slowest wire around one frame.
-- A grid with more than about 4 million cells is not searched. The Z fallback is used instead.
+## Skipping work that didn't change
 
-**The shared search table**
-- A search can reach at most about 24,000 states, however large its grid is.
-- So all searches share one table with 65,536 slots (about 1.4 MB), instead of arrays as large as
-  the grid.
-- Grid-sized arrays would take 143 MB and 70 ms to fill for one long wire across 1000 scattered
-  nodes.
-- Each search has an id. A slot written by an older search counts as empty, so nothing needs to
-  be cleared between searches.
-- Small grids use the state number directly as the slot. Large grids use Fibonacci hashing with
-  linear probing.
+Each frame works out what a change could have affected and skips the rest:
 
-**Lanes**
-- Wires that would run on top of each other are spread side by side, up to 6px apart.
-- Only middle segments move, so wires still start and end exactly on their anchors.
-- The spread stays inside the clearance band, so no lane touches a node.
-
----
-
-## 8. Redrawing only what changed
-
-> **In short:** every frame asks "what could this change affect?" and skips everything else.
-
-| Situation | What is skipped |
+| When | What gets skipped |
 | --- | --- |
-| Nothing moved, graph version unchanged | All wire work |
-| One node dragged | Wires whose box does not touch its old or new spot |
-| Several nodes dragged together | Wires between two of them move along instead of re-routing |
-| A wire's points did not change | Its SVG path string and its packet track |
-| A node's title or content did not change | Its DOM; focus in an input stays put |
-| A node's classes did not change | Its `className` write |
+| Nothing moved and the graph version is unchanged | All wire work |
+| One node is dragged | Wires whose box doesn't touch its old or new spot |
+| Several nodes are dragged together | Re-routing wires between two of them; those wires move along |
+| A wire's points didn't change | Its SVG path string and its packet track |
+| A node's title or content didn't change | Its DOM, so focus in an input stays put |
+| A node's classes didn't change | Writing its `className` |
 | Undo, redo or `load()` | Nodes whose position stayed the same |
-| Nothing was measured in this frame | Auto-layout |
+| Nothing was measured this frame | Auto-layout |
 
-**More details**
-- Wire notes are sized from their text length (6.5px per character) instead of being measured.
-  Measuring would cost one layout per note.
-- The minimap reuses its group rectangles instead of creating new ones on every drag frame.
-- Removing many nodes walks the wires once, not once per node. Removing 1000 nodes takes 0.2 ms.
+Wire notes are sized from their text length, at 6.5px per character, because measuring them would
+cost a layout per note. The minimap reuses its group rectangles instead of creating new ones every
+drag frame. Removing many nodes walks the wire list once instead of once per node, so removing 1000
+nodes takes 0.2 ms.
 
----
+## The spatial hash
 
-## 9. The spatial hash
+The spatial hash answers "what is near this rectangle?" without looking at every node. It is a grid
+of 256px buckets, and each rectangle goes into every bucket it touches. Bucket keys are numbers
+(`cx * 1_000_003 + cy`) rather than strings, so a lookup builds no strings. That matters because
+overlap removal runs thousands of lookups.
 
-> **In short:** a grid of 256px buckets, so "what is near this rectangle?" only checks nearby
-> nodes.
+Some rectangles are never walked bucket by bucket. Anything wider or taller than 64 buckets, or with
+coordinates beyond 2^50, goes into a separate list that is checked one entry at a time. Past 2^50,
+`cx++` no longer changes the number, and a loop over the cells would never end. Queries over huge
+areas scan only the buckets that exist. Together, these limits keep the work bounded for any input,
+`Infinity` included.
 
-**How it works**
-- Every rectangle is added to each bucket it touches.
-- A bucket key is a number, `cx * 1_000_003 + cy`, not a string, so lookups build no strings.
-  Overlap removal runs thousands of lookups.
+The hash keeps its own private copy of the rectangle overlap check. Sharing that function with the
+router made it polymorphic in V8, and free-spot searches measured about 60% slower.
 
-**Limits, for safety**
-- A rectangle wider or taller than 64 buckets goes to a separate list, which is checked one by one.
-- Coordinates beyond 2^50 go to that list too. Past that size, `cx++` no longer changes the
-  number, and a loop would never end.
-- Queries of huge areas scan only the buckets that exist.
-- Result: the work stays bounded for any input, even `Infinity`.
+## Layout and overlap removal
 
-**A V8 detail**
-- The hash has its own private copy of the overlap check.
-- Sharing one function with the router made it polymorphic in V8. Free-spot searches measured
-  about 60% slower.
+Auto-layout puts each node in a column given by the longest wire path leading into it. Inside a
+column, nodes keep the order they were added in, and columns are centred vertically. Each group
+gets its own horizontal band so its frame never reaches over other nodes. Nodes added later go to
+the right of the existing ones. A node is only laid out once, and positions from `at()`, `load()`
+or a drag always win.
 
----
+The longest-path walk uses an explicit stack instead of recursion. Recursion would overflow the
+call stack on a chain of a few thousand nodes wired against insertion order, and a saved state can
+contain such a chain. When the walk closes a cycle, that wire counts as coming from depth -1, which
+ends the cycle.
 
-## 10. Layout and overlaps
+When nodes end up on top of each other, the spatial hash finds the overlapping pairs, looking only
+at nodes that changed. Of each pair, the node defined later moves. It searches the grid ring by ring
+for the nearest free spot, up to 500 rings out, so even hundreds of stacked nodes find room. Nodes
+being dragged are left alone until they are dropped.
 
-> **In short:** columns follow the wires. Nodes that land on top of each other move to the nearest
-> free grid spot.
+## Packets
 
-**Auto-layout**
-- A node's column is the length of the longest wire path leading into it.
-- Within a column, nodes keep the order in which they were added. Columns are centered vertically.
-- Each group gets its own horizontal band, so frames never reach over other nodes.
-- Nodes added later go to the right of the existing ones.
-- Each node is laid out once. Positions from `at()`, `load()` or a drag always win.
+Each packet dot is a WebGL2 point sprite with 32 bytes of data. A frame uploads one buffer and makes
+one draw call, however many dots there are. Without WebGL2, dots fall back to SVG circles.
 
-**Why no recursion?**
-- The longest-path walk uses an explicit stack.
-- With recursion, a chain of a few thousand nodes wired against insertion order overflowed the
-  call stack. A saved state can contain such a chain.
-- In a cycle, the wire that closes it counts as coming from depth -1, so cycles end.
+Dots are still styled with CSS. Hidden probe circles get each packet class, and their computed
+`fill`, `stroke`, `stroke-width` and `r` become the dot's look. The looks are read again every
+frame, so a theme switch also recolours dots that are already moving.
 
-**Pulling overlaps apart**
-- The spatial hash finds pairs of overlapping nodes. Only nodes that changed are checked.
-- Of two overlapping nodes, the one defined later moves.
-- It searches grid rings outward for the nearest free spot, up to 500 rings, so even hundreds of
-  stacked nodes find room.
-- Dragged nodes are ignored until they are dropped.
+To move a dot along a wire, the renderer needs the point at a given distance. The browser's
+`getPointAtLength()` takes about 15 µs per call, which is too slow for thousands of dots a frame.
+A `Track` turns the rounded wire into a polyline that stays within 0.1px of the curve and finds
+points on it with a binary search. Each packet stores its progress as a fraction from 0 to 1, so
+when its wire re-routes, it stays at the same fraction of the new path. If the wire is deleted, the
+packet re-plans from the node it left, and it fades out when no route is left.
 
----
+A frame step is capped at 100 ms, so packets don't jump ahead when a background tab comes back.
+The WebGL context is released after 2 seconds without dots, since browsers allow only about 16
+contexts per page. With `prefers-reduced-motion` set, dropped dots disappear without a fade.
 
-## 11. Packets
+## Pointer input
 
-> **In short:** all dots are drawn by WebGL in one draw call per frame. Their look still comes
-> from CSS.
+Gestures listen on `window`, so moves and the drop register wherever the pointer goes.
+`setPointerCapture` isn't used because it would retarget `pointerup` to the drag source. Holding a
+drag within 40px of the border pans the view, at a speed based on elapsed time rather than frame
+rate. A press that moves less than 4px counts as a click.
 
-**Drawing**
-- Each dot is a WebGL2 point sprite, 32 bytes of data.
-- One buffer upload and one draw call per frame, for any number of dots.
-- Without WebGL2, dots fall back to SVG circles.
+## Input checks
 
-**Styling with CSS**
-- Hidden probe circles get each packet class. Their computed `fill`, `stroke`, `stroke-width` and
-  `r` become the dot's look.
-- Looks are read again each frame, so a theme switch reaches dots already in flight.
-
-**Moving along wires**
-- The browser's `getPointAtLength()` costs about 15 µs per call. That is too slow for thousands of
-  dots per frame.
-- A `Track` turns the rounded wire path into a polyline, within 0.1px of the real curve. It then
-  finds a point by binary search.
-- A packet stores its progress from 0 to 1. When its wire re-routes, the packet stays at the same
-  fraction of the new path.
-- When its wire is deleted, the packet re-plans from the node it left. With no route left, it
-  fades out.
-
-**Being a good citizen**
-- One frame step is capped at 100 ms, so packets do not jump after a background tab returns.
-- The WebGL context is released after 2 seconds without dots. Browsers allow only about 16
-  contexts per page.
-- With `prefers-reduced-motion`, dropped dots vanish without a fade.
-
----
-
-## 12. Input and safety
-
-> **In short:** every value from outside is checked where it enters, before anything changes.
-> Work and memory stay bounded for any input.
-
-**Pointer input**
-- Gestures listen on `window`, so a drag keeps working when the pointer leaves the graph.
-- `setPointerCapture` is not used, because it would retarget `pointerup` to the drag source.
-- Near the border (40px), a drag pans the view. The speed depends on time, not frame rate.
-- A press that moves less than 4px is a click.
-
-**Checked at the boundary**
+Everything from outside is checked where it enters, before anything changes, and no input can make
+the work or memory grow without limit.
 
 | Input | Check | Without the check |
 | --- | --- | --- |
@@ -372,39 +282,28 @@ type State = {
 | Node ids | No `.` or `>` | Two different wires can share one key |
 | Options | Zoom above 0, min not above max, whole-number history | Broken zoom or undo |
 
-**Rules behind it**
-- **Check first, change second.** `load()` checks everything before it touches the graph, so it
-  never leaves a half-loaded graph.
-- **Wrong shape, no change.** A state that is not `{ positions, edges }` is rejected as a whole.
-- **Drop, do not crash.** Bad entries are skipped with one warning per list, not one per entry, so
-  a huge crafted list cannot flood the console.
-- **No HTML from callers.** Titles and notes are set with `textContent`, never `innerHTML`.
-- **Private events.** The event target is private, so other code cannot fire fake `change` events.
-- **Clean shutdown.** After `destroy()`, no frame runs and `send()` resolves `[]`.
-- **Clear errors.** Every error starts with `betternodes:`.
+`load()` checks the whole state before it touches the graph, so it never leaves a half-loaded graph
+behind. A state that isn't shaped like `{ positions, edges }` is rejected as a whole. Bad entries
+inside a valid state are dropped with one warning per list rather than one per entry, so a huge
+crafted list can't flood the console.
 
-**Typed wire ends**
-- `End<S>` is a template literal type. A literal like `'a.x'` fails to compile, because `x` is not
-  an anchor.
-- Strings only known at runtime are checked at runtime.
+Titles and notes are set with `textContent`, never `innerHTML`. The event target is private, so
+other code can't fire fake `change` events. After `destroy()`, no more frames run and `send()`
+resolves with `[]`. Every error message starts with `betternodes:`.
 
----
+The type system checks wire ends too. `End<S>` is a template literal type, so a literal such as
+`'a.x'` fails to compile, because `x` isn't an anchor. Strings that are only known at runtime are
+checked at runtime.
 
-## 13. Testing and benchmarks
+## Tests and benchmarks
 
-> **In short:** tests run in real Chromium, not a fake DOM. Every hot path has a benchmark that
-> fails above its time budget.
+Tests run in headless Chromium through Vitest's browser mode, not in a simulated DOM, so layout,
+`ResizeObserver` and WebGL behave the way they do for users. `test/types.check.ts` is compiled but
+never run. Its `@ts-expect-error` lines prove that wrong calls fail to compile.
 
-**Tests**
-- Vitest browser mode runs every test in headless Chromium. Layout, `ResizeObserver` and WebGL
-  behave as they do for users.
-- `test/types.check.ts` is compiled but never run. Its `@ts-expect-error` lines prove that wrong
-  calls fail to compile.
-
-**Benchmarks**
-- `npm run bench` measures medians in headless Chromium.
-- Frame budgets are 8 ms, about half of a 60 fps frame (16.7 ms). The rest is left for the
-  browser and the host app.
+`npm run bench` measures medians in the same headless Chromium, and a scenario fails when it goes
+over its budget. Frame budgets are 8 ms, about half of a 60 fps frame (16.7 ms), which leaves the
+rest for the browser and the host app.
 
 | Scenario | Median | Budget |
 | --- | --- | --- |
@@ -425,12 +324,7 @@ type State = {
 | Frame rate while dragging or panning, 1000 nodes | 60 fps | 30 fps |
 | Frame rate with 2000 packets in flight | 60 fps | 30 fps |
 
----
-
-## 14. Development
-
-> **In short:** `npm install`, `npm run dev`, `npm test`. Run the benchmarks before and after any
-> change to rendering or routing.
+## Development
 
 ```sh
 git clone https://github.com/virtualtear/betternodes.git
@@ -447,34 +341,31 @@ npx playwright install chromium   # once, for tests and benchmarks
 | `npm run bench` | Benchmarks with budgets |
 | `npm run build` | `dist/index.js`, `dist/index.d.ts`, `dist/style.css` |
 
-The demo has edit mode, undo, packets and an event log. Add `?n=1000` for a stress test with an
-fps counter.
+The demo has edit mode, undo, packets and an event log. Add `?n=1000` to the URL for a stress test
+with an fps counter.
 
-**Before changing a hot path**
-1. Run `npm run bench` and save the numbers.
-2. Make the change.
-3. Run it again. No row should get more than 5% slower; rerun if a result looks like noise.
+If you change anything on a hot path, run `npm run bench` before and after. No row should get more
+than 5% slower, and if a number looks like noise, run it again.
 
-**Code rules**
-- Strict TypeScript. Type-only imports use `import type`.
-- Keep the layers: no DOM outside `view/`, no imports from a higher layer.
+The code follows a few rules:
+
+- Strict TypeScript, with `import type` for type-only imports.
+- The layers stay intact: no DOM outside `view/`, and no imports from a higher layer.
 - No runtime dependencies.
-- DOM writes go through the frame loop. Never read layout between writes.
-- No new allocations in code that runs every frame.
-- Check input where it enters the public API.
-- Exported declarations get a one-line TSDoc summary. Comments explain why, not what.
+- DOM writes go through the frame loop, and layout is never read between writes.
+- Changes don't add allocations to code that runs every frame.
+- Public API input is checked where it enters.
+- Exported declarations get a one-line TSDoc summary, and comments explain why rather than what.
 
----
+## Known limits
 
-## 15. Known limits
-
-> **In short:** built for graphs up to a few thousand nodes. These are the next steps if graphs
-> get bigger.
+betternodes is built for graphs of up to a few thousand nodes. This table lists where it should
+slow down first as graphs grow, and what the next step would be.
 
 | Limit | When it starts to matter | Next step |
 | --- | --- | --- |
 | Route obstacles are scanned one by one | Around 2000 nodes | A spatial index for obstacles |
-| All wires are scanned when something changes | Around 5000 wires | An index from node to its wires |
+| All wires are scanned when something changes | Around 5000 wires | An index from each node to its wires |
 | No crossing minimization in auto-layout | Dense, tangled graphs | A layered layout such as elkjs or dagre |
 | Undo stores whole snapshots | Very large graphs with deep history | Store inverse diffs |
 | Note placement checks every node per spot | Many notes on large graphs | Use the spatial hash for notes |

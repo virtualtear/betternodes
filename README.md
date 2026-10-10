@@ -5,7 +5,9 @@
 ![Size: 18.3 kB min+gzip](https://img.shields.io/badge/size-18.3%20kB%20min%2Bgzip-informational.svg)
 ![TypeScript](https://img.shields.io/badge/types-TypeScript-3178c6.svg)
 
-A framework-agnostic node graph viewer and editor, built on plain DOM and SVG.
+A node graph viewer and editor built on plain DOM and SVG, with no framework required. You define
+nodes and wires in code, then show them read-only or let users edit them, draw.io style. Every user
+edit comes out as JSON.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.png">
@@ -21,7 +23,7 @@ A framework-agnostic node graph viewer and editor, built on plain DOM and SVG.
 - Auto-layout, groups, a minimap, and light and dark themes
 - Animated packets, drawn with WebGL
 - JSON state and diffs for every user edit
-- Smooth with 1000+ nodes ([benchmarks](TECHNICAL.md#13-testing-and-benchmarks))
+- Drag frames stay under 5 ms on a 1000-node graph ([benchmarks](TECHNICAL.md#tests-and-benchmarks))
 
 ## Installation
 
@@ -304,14 +306,13 @@ Current Chrome, Edge, Firefox and Safari. Packets fall back to SVG without WebGL
 
 ## How it works
 
-[TECHNICAL.md](TECHNICAL.md) explains the architecture and the reasons behind it: the frame loop,
-wire routing, layout, packets, validation, tests and benchmarks.
+[TECHNICAL.md](TECHNICAL.md) covers how the library works inside and why it is built that way.
 
 ## Contributing
 
-Issues and pull requests are welcome. Run `npm test` before opening a pull request, and
-`npm run bench` if you changed rendering or routing. See [TECHNICAL.md](TECHNICAL.md#14-development)
-for the setup.
+Bug reports and pull requests are welcome. Please run `npm test` before opening a pull request,
+and `npm run bench` if you changed rendering or routing. The setup is described in
+[TECHNICAL.md](TECHNICAL.md#development).
 
 ## License
 
