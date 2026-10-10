@@ -320,7 +320,8 @@ test('fit() brings the graph back into view after panning away', async () => {
   await frame()
   await drag({ x: 700, y: 500 }, { x: 0, y: 0 })
   await drag({ x: 700, y: 500 }, { x: 0, y: 0 })
-  expect(inside(el.querySelector('[data-node="a"]')!, el.getBoundingClientRect())).toBe(false)
+  // Panned that far, the node has no element at all.
+  expect(el.querySelector('[data-node="a"]')).toBeNull()
   f.fit()
   await frame()
   expect(inside(el.querySelector('[data-node="a"]')!, el.getBoundingClientRect())).toBe(true)

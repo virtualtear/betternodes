@@ -75,6 +75,13 @@ export interface FlowOptions {
    */
   minimap?: boolean
   /**
+   * Gives only nodes in or near the visible area an element, so a graph of any size pans and drags
+   * smoothly. Turn it off to keep every node's `content()` in the page, e.g. a video that must keep
+   * playing; then a frame costs time in proportion to the number of nodes.
+   * @defaultValue `true`
+   */
+  virtual?: boolean
+  /**
    * Decides whether a wire the user draws or reconnects may exist; return false to reject it.
    * Gets the ends as they would be stored: `'node.anchor'`, or a bare node id for a floating end.
    * Wires from code are never checked.
@@ -100,6 +107,7 @@ const DEFAULTS: Settings = {
   remove: true,
   snap: true,
   minimap: false,
+  virtual: true,
   canConnect: () => true,
 }
 

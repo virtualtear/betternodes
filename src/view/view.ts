@@ -1,5 +1,5 @@
 import { Buckets } from '../geometry/buckets'
-import { GRID, clamp, fitInto, frameAround, union, type Point, type Rect } from '../geometry/rect'
+import { GRID, clamp, fitInto, frameAround, overlap, union, type Point, type Rect } from '../geometry/rect'
 import { reach, route } from '../geometry/route'
 import { curve } from '../geometry/svg-path'
 import { layout } from '../layout/columns'
@@ -16,7 +16,8 @@ import { Wires } from './wires'
 
 // Screen px between a fitted graph and the root's border.
 const FIT_PAD = 40
-const UNMEASURED: Readonly<Point> = [0, 0]
+// Size assumed for a node that has no element to measure, until any node has been measured.
+const GUESS: Readonly<Point> = [160, 40]
 
 /** Renders a graph into a root element, batching DOM writes into one animation frame. */
 export class View {
@@ -25,7 +26,7 @@ export class View {
   y = 0
   /** Zoom factor: screen px per world px. */
   k = 1
-  /** Root size in screen px, as of the last frame that fitted, drew the minimap or drew packets. */
+  /** Root size in screen px, as of the last frame that read it: fits, the minimap, packets and culling do. */
   width = 0
   height = 0
   /** Nodes being dragged right now; they may overlap others until they are dropped. */
@@ -73,9 +74,18 @@ export class View {
   // The area nodes have covered so far. It only grows, so a later layout batch never lands on them.
   private extent?: Rect
   private readonly resize = new ResizeObserver(entries => {
-    for (const e of entries) this.stale.add((e.target as HTMLElement).dataset.node!)
+    for (const e of entries) {
+      if (e.target === this.root) this.resized = true
+      else this.stale.add((e.target as HTMLElement).dataset.node!)
+    }
     this.update()
   })
+  private resized = false
+  // Size of a node without a measurement: the first one measured stands in for the rest.
+  private guess = GUESS
+  // World area whose nodes have elements, and the zoom it was made for; unset until the root has a size.
+  private area?: Rect
+  private areaK = 0
   private readonly tabbed: boolean
   private queued = false
   private frame = 0
@@ -95,6 +105,7 @@ export class View {
     // Focusable, so a click inside it lets Delete and Escape reach its keydown listener.
     this.tabbed = !root.hasAttribute('tabindex')
     if (this.tabbed) root.tabIndex = -1
+    this.resize.observe(root)
     this.wires = new Wires(graph, this.notes, this.rects, this.index, (from, to, near) => this.wire(from, to, near))
     this.groups = new Groups(graph, this.svg)
     this.svg.append(arrowDefs(), this.notes, this.preview, this.packets)
@@ -194,6 +205,8 @@ export class View {
     if (this.destroyed) return
     for (const n of this.graph.nodes.values()) {
       n.placed = false
+      // Mounted for measuring, if they aren't: layout needs every node's size.
+      this.dirty.add(n.id)
       this.stale.add(n.id)
       this.unplaced.add(n.id)
     }
@@ -268,7 +281,7 @@ export class View {
   /** A node's rect in world px: position and measured size. */
   box(id: string): Rect {
     const { x, y } = this.graph.nodes.get(id)!
-    const [w, h] = this.sizes.get(id) ?? UNMEASURED
+    const [w, h] = this.sizes.get(id) ?? this.guess
     return [x, y, w, h]
   }
 
@@ -283,23 +296,38 @@ export class View {
   private flush(now: number) {
     this.queued = false
     // Read before this frame's writes, which a read would otherwise have to lay out first.
-    if (this.fitting || this.settings.minimap || this.dots.size) {
+    if (this.fitting || this.settings.minimap || this.dots.size || this.resized || (this.settings.virtual && !this.width)) {
       this.width = this.root.clientWidth
       this.height = this.root.clientHeight
     }
+    // A first guess at the fit, from what is known before measuring, so the right nodes get elements.
+    if (this.fitting) this.fitAll(true)
     if (this.panned) this.applyViewport()
-    for (const id of this.dirty) this.renderNode(this.graph.nodes.get(id)!)
-    for (const id of this.moved) this.renderPlace(this.graph.nodes.get(id)!)
-    for (const id of this.stale) if (this.measure(id)) this.moved.add(id)
+    for (const id of this.cull(this.resized)) this.dirty.add(id)
+    this.resized = false
+    for (const id of this.dirty) {
+      // Nodes without an element still get a rect, from their position and a guessed size.
+      if (this.els.has(id) || this.wanted(id)) this.renderNode(this.graph.nodes.get(id)!)
+      else this.moved.add(id)
+    }
+    for (const id of this.moved) if (this.els.has(id)) this.renderPlace(this.graph.nodes.get(id)!)
+    for (const id of this.stale) if (this.els.has(id) && this.measure(id)) this.moved.add(id)
     // After measuring: unplaced nodes are always stale, since node() and relayout() mark them.
     if (this.unplaced.size) this.autoLayout()
     for (const id of this.moved) this.sync(id)
     this.pullApart()
+    const fitted = this.fitting && this.fitAll()
+    // Moved in or out of the mount area, or into view by the fit: new elements wait for next frame.
+    const late = fitted ? this.cull(true) : []
+    for (const id of this.moved) {
+      const want = this.wanted(id)
+      if (!want && this.els.has(id)) this.unmount(id)
+      else if (want && !this.els.has(id)) late.push(id)
+    }
     if (this.regroup || this.moved.size) {
       this.regroup = false
       this.groups.render(this.frames())
     }
-    const fitted = this.fitting && this.fitAll()
     this.toggleMinimap()
     this.mini?.render(this.moved, this.panned || fitted)
     this.wires.render(this.shifted, this.dragging)
@@ -308,6 +336,8 @@ export class View {
     this.moved.clear()
     this.stale.clear()
     this.shifted.clear()
+    for (const id of late) this.dirty.add(id)
+    if (late.length) this.update()
     if (this.panned || fitted) this.onViewport?.()
     this.panned = false
     this.onFrame?.(now)
@@ -316,8 +346,53 @@ export class View {
 
   private move(n: NodeDef, x: number, y: number) {
     Object.assign(n, { x, y })
-    this.els.get(n.id)!.style.transform = `translate(${x}px, ${y}px)`
+    const el = this.els.get(n.id)
+    if (el) el.style.transform = `translate(${x}px, ${y}px)`
     this.moved.add(n.id)
+  }
+
+  // Whether a node should have an element: it meets the mount area, waits for layout (which needs
+  // its size), is being dragged or holds focus. Without the `virtual` option, every node has one.
+  private wanted(id: string) {
+    const n = this.graph.nodes.get(id)!
+    if (!this.settings.virtual || !n.placed || this.dragging.has(id)) return true
+    if (!this.area) return false
+    const r = this.rects.get(id) ?? [n.x, n.y, ...this.guess]
+    return overlap(r, this.area) || !!this.els.get(id)?.contains(document.activeElement)
+  }
+
+  // Unmounts the nodes outside the mount area and returns the ones in it that need an element. The
+  // area is the view grown by half its size on every side, made anew only once the view leaves its
+  // inner part or zooms in a lot, so most pans touch no element. Costs what the area holds.
+  private cull(force: boolean): string[] {
+    if (!this.settings.virtual) {
+      // Turned off since the last frame: every node gets its element back.
+      const all = this.area ? [...this.graph.nodes.keys()].filter(id => !this.els.has(id)) : []
+      this.area = undefined
+      return all
+    }
+    if (!this.width || !this.height) return []
+    const [w, h] = [this.width / this.k, this.height / this.k]
+    const [vx, vy] = [-this.x / this.k, -this.y / this.k]
+    const a = this.area
+    const inside = a && vx >= a[0] + a[2] / 8 && vy >= a[1] + a[3] / 8 && vx + w <= a[0] + a[2] * 7 / 8 && vy + h <= a[1] + a[3] * 7 / 8
+    if (!force && inside && this.k < this.areaK * 1.5) return []
+    this.area = [vx - w / 2, vy - h / 2, 2 * w, 2 * h]
+    this.areaK = this.k
+    const next = new Set<string>()
+    this.index.near(this.area, id => next.add(id))
+    for (const id of [...this.els.keys()]) if (!next.has(id) && !this.wanted(id)) this.unmount(id)
+    return [...next].filter(id => !this.els.has(id))
+  }
+
+  // Takes a node's element out of the page; its content element stays with the node definition.
+  private unmount(id: string) {
+    const el = this.els.get(id)!
+    this.resize.unobserve(el)
+    el.remove()
+    this.els.delete(id)
+    // So mounting again inserts the content again.
+    this.contents.delete(id)
   }
 
   // Runs after measuring, since it needs sizes. `placed` keeps later wire changes from moving a node again.
@@ -335,7 +410,7 @@ export class View {
   // frame's wire work.
   private sync(id: string) {
     const n = this.graph.nodes.get(id)!
-    const [w, h] = this.sizes.get(id) ?? UNMEASURED
+    const [w, h] = this.sizes.get(id) ?? this.guess
     const old = this.rects.get(id)
     if (old && old[0] === n.x && old[1] === n.y && old[2] === w && old[3] === h) return
     const rect: Rect = [n.x, n.y, w, h]
@@ -402,8 +477,9 @@ export class View {
     this.root.style.backgroundSize = `${GRID * k}px ${GRID * k}px`
   }
 
-  // Applies the viewport right away so nothing flashes. Stays pending while there is nothing to fit.
-  private fitAll() {
+  // Applies the viewport right away so nothing flashes. Stays pending while there is nothing to fit,
+  // and after a `rough` fit, which uses guessed sizes for nodes not measured yet.
+  private fitAll(rough = false) {
     const ids = (this.fitIds ?? [...this.graph.nodes.keys()]).filter(id => this.graph.nodes.has(id))
     // Fitting nodes that got deleted meanwhile is dropped, not kept for when undo brings them back.
     if (this.fitIds && !ids.length) this.fitting = false
@@ -412,7 +488,7 @@ export class View {
     const rects = [...ids.map(id => this.box(id)), ...(this.fitIds ? [] : this.frames().values())]
     const { minZoom, maxZoom } = this.settings
     Object.assign(this, fitInto(union(rects), this.width, this.height, FIT_PAD, [minZoom, Math.min(1, maxZoom)]))
-    this.fitting = false
+    if (!rough) this.fitting = false
     this.applyViewport()
     return true
   }
@@ -461,6 +537,7 @@ export class View {
     const [w, h] = [r.width / this.k, r.height / this.k]
     const old = this.sizes.get(id)
     this.sizes.set(id, [w, h])
+    if (this.guess === GUESS) this.guess = [w, h]
     return !old || old[0] !== w || old[1] !== h
   }
 }
