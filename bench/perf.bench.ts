@@ -97,6 +97,7 @@ test('route: 10 wires across 1000 scattered nodes', async () => {
   const rand = random(11)
   const rects = Array.from({ length: 1000 }, (): Rect => [Math.round(rand() * 7000), Math.round(rand() * 4000), 160, 37])
   await measure('route: 10 long wires across 1000 scattered nodes', {
+    budget: 300,
     runs: 3,
     warmup: 1,
     run: () => {

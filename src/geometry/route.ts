@@ -11,6 +11,12 @@ const REGION = 100
 const BEND = 40
 // Search steps per wire before giving up; keeps the slowest wire around one frame.
 const BUDGET = 8000
+// Bits of the search table's size: at least twice the states a search can reach (each of BUDGET
+// expanded states adds up to 3), so open addressing stays fast and never runs out of slots.
+const BITS = Math.ceil(Math.log2(2 * (3 * BUDGET + 1)))
+// Largest search grid, in cells: its blocked-edge maps take 2 bytes per cell. A long wire across 1000
+// scattered nodes needs about 2.8M.
+const MAX_GRID = 1 << 22
 
 // Directions: 0 east, 1 west, 2 south, 3 north. `d ^ 1` is the opposite direction.
 const STEP: Point[] = [[1, 0], [-1, 0], [0, 1], [0, -1]]
@@ -38,7 +44,7 @@ function simplify(points: Point[]) {
  * @param da - axis-aligned direction the wire leaves `a` in.
  * @param db - axis-aligned direction pointing out of `b`'s node; the wire arrives against it.
  * @returns at least `[a, b]`; never fails, but falls back to a simple Z shape (which may cross a
- * node) when no route is found within the search budget.
+ * node) when no route is found within the search budget, or the area is too crowded to search.
  */
 // ponytail: obstacles are scanned linearly and limited to a region around the wire; add a spatial
 // index if graphs pass ~2k nodes, and a wider region if far detours start crossing nodes.
@@ -116,6 +122,7 @@ function search(s: Point, t: Point, start: number, end: number, rects: Rect[], [
   const xs = [...new Set([s[0], t[0], mx, ...rects.flatMap(r => [r[0], r[0] + r[2]])])].sort((p, q) => p - q)
   const ys = [...new Set([s[1], t[1], my, ...rects.flatMap(r => [r[1], r[1] + r[3]])])].sort((p, q) => p - q)
   const [nx, ny] = [xs.length, ys.length]
+  if (nx * ny > MAX_GRID) return
   const xi = new Map(xs.map((v, i) => [v, i]))
   const yi = new Map(ys.map((v, i) => [v, i]))
 
@@ -147,33 +154,31 @@ function search(s: Point, t: Point, start: number, end: number, rects: Rect[], [
     const dy = t[1] - ys[j]
     return Math.abs(dx) + Math.abs(dy) + BEND * bends(dx, dy, d)
   }
-  // Per-state typed arrays indexed by (j * nx + i) * 4 + direction. Maps keyed by state cost most
-  // of the search time; failed searches run the full budget, so every step counts.
-  const states = nx * ny * 4
-  const best = new Float64Array(states).fill(Infinity)
-  const prev = new Int32Array(states)
-  const done = new Uint8Array(states)
+  // States are (j * nx + i) * 4 + direction, kept in the shared table below.
+  const table = Table.next(nx * ny * 4)
   const heap = new Heap()
   const [si, sj] = [xi.get(s[0])!, yi.get(s[1])!]
   const first = (sj * nx + si) * 4 + start
-  best[first] = 0
-  prev[first] = -1
+  const at = table.slot(first)
+  table.cost[at] = 0
+  table.prev[at] = -1
   heap.push(guess(si, sj, start), first)
 
   for (let steps = BUDGET; heap.size && steps--; ) {
     const state = heap.pop()
-    if (done[state]) continue // a cheaper copy of this state was already expanded
-    done[state] = 1
+    const here = table.slot(state)
+    if (table.done[here]) continue // a cheaper copy of this state was already expanded
+    table.done[here] = 1
     const d = state & 3
     const cell = state >> 2
     const i = cell % nx
     const j = (cell - i) / nx
     if (i === ti && j === tj && d !== (end ^ 1)) {
       const path: Point[] = []
-      for (let st = state; st !== -1; st = prev[st]) path.push([xs[(st >> 2) % nx], ys[Math.floor((st >> 2) / nx)]])
+      for (let st = state; st !== -1; st = table.prev[table.slot(st)]) path.push([xs[(st >> 2) % nx], ys[Math.floor((st >> 2) / nx)]])
       return path.reverse()
     }
-    const cost = best[state]
+    const cost = table.cost[here]
     for (let nd = 0; nd < 4; nd++) {
       if (nd === (d ^ 1)) continue
       const ni = i + STEP[nd][0]
@@ -182,11 +187,58 @@ function search(s: Point, t: Point, start: number, end: number, rects: Rect[], [
       const next = (nj * nx + ni) * 4 + nd
       const nc = cost + Math.abs(xs[ni] - xs[i]) + Math.abs(ys[nj] - ys[j]) + (nd === d ? 0 : BEND)
         + (ni === ti && nj === tj && nd !== end ? BEND : 0) // the last stub into `b` would bend here
-      if (nc < best[next]) {
-        best[next] = nc
-        prev[next] = state
+      const there = table.slot(next)
+      if (nc < table.cost[there]) {
+        table.cost[there] = nc
+        table.prev[there] = state
         heap.push(nc + guess(ni, nj, nd), next)
       }
+    }
+  }
+}
+
+/**
+ * Costs, back links and expanded flags of one search's states, in typed arrays shared by every
+ * search: a search reaches at most about 3 * BUDGET states, however large its grid. Grid-sized
+ * arrays instead took 143 MB and 70 ms to fill for a long wire across 1000 scattered nodes.
+ */
+class Table {
+  static readonly SIZE = 1 << BITS
+  private static shared?: Table
+  readonly cost = new Float64Array(Table.SIZE)
+  readonly prev = new Int32Array(Table.SIZE)
+  readonly done = new Uint8Array(Table.SIZE)
+  private readonly key = new Int32Array(Table.SIZE)
+  // The search a slot belongs to; slots of earlier searches count as free, so nothing is cleared.
+  private readonly owner = new Uint32Array(Table.SIZE)
+  private search = 0
+  // States index slots directly when they all fit, which needs no hashing or probing.
+  private direct = false
+
+  /** The shared table, emptied for a search over `states` states. */
+  static next(states: number) {
+    const t = (Table.shared ??= new Table())
+    if (++t.search === 2 ** 32) {
+      t.owner.fill(0)
+      t.search = 1
+    }
+    t.direct = states <= Table.SIZE
+    return t
+  }
+
+  /** The slot of `state`, taken for it with infinite cost if it has none yet. */
+  slot(state: number) {
+    // Fibonacci hashing: the top bits of the product spread neighbouring states apart.
+    let i = this.direct ? state : Math.imul(state, 0x9e3779b1) >>> (32 - BITS)
+    for (;; i = (i + 1) & (Table.SIZE - 1)) {
+      if (this.owner[i] !== this.search) {
+        this.owner[i] = this.search
+        this.key[i] = state
+        this.cost[i] = Infinity
+        this.done[i] = 0
+        return i
+      }
+      if (this.key[i] === state) return i
     }
   }
 }
