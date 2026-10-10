@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest'
 import { flow } from '../src/index'
+import { Buckets } from '../src/geometry/buckets'
 import { rounded, Track } from '../src/geometry/svg-path'
 import { center, container, drag, frame, pointer, wirePoint } from './util'
 
@@ -249,4 +250,25 @@ test('a track walks the rounded path a wire draws, as the browser measures it', 
       expect(Math.hypot(tx - x, ty - y)).toBeLessThan(0.1)
     }
   }
+})
+
+test('the spatial hash stays correct and quick for huge, far-out or non-finite rects', () => {
+  const b = new Buckets<string>()
+  b.add([0, 0, 100, 40], 'node')
+  b.add([-1e7, -1e7, 2e7, 2e7], 'huge')
+  b.add([3e18, 0, 160, 40], 'far')
+  b.add([Infinity, 0, 160, 40], 'infinite')
+  b.add([NaN, 0, 160, 40], 'nan')
+  const near = (area: [number, number, number, number]) => {
+    const seen = new Set<string>()
+    b.near(area, v => seen.add(v))
+    return [...seen].sort()
+  }
+  expect(near([50, 10, 10, 10])).toEqual(['huge', 'node'])
+  // Doubles are 512 apart out there, so the query has to be wide to overlap anything.
+  expect(near([3e18 - 1e4, 10, 2e4, 10])).toEqual(['far'])
+  expect(near([-1e300, -1e300, 2e300, 2e300])).toEqual(['far', 'huge', 'node'])
+  expect(b.empty([2e7, 2e7, 10, 10])).toBe(true)
+  expect(b.empty([Infinity, 0, 10, 10])).toBe(true)
+  expect(b.empty([200, 0, 10, 10])).toBe(false)
 })
