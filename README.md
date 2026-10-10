@@ -177,7 +177,7 @@ Options only limit users. Calls from your code always work.
 
 ### Nodes
 
-`f.node(id)` returns a chainable builder. Ids must not contain `.` or `>`.
+`f.node(id)` returns a chainable builder. Ids must not contain `.` or `>`, and `__proto__` is reserved.
 
 | Method | Description |
 | --- | --- |

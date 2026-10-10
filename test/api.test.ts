@@ -131,6 +131,10 @@ test('load() replaces positions and wires with saved ones', () => {
   expect(f.state()).toEqual({ positions: { a: [10, 20], b: [300, 40] }, edges: [['a.s', 'b.n']] })
 })
 
+test('node() rejects the id __proto__, which state().positions could not hold', () => {
+  expect(() => flow(container()).node('__proto__')).toThrow(/reserved/)
+})
+
 test('load() drops wires to anchors or nodes that no longer exist, with a warning', () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
   const f = twoNodes()

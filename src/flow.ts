@@ -70,10 +70,12 @@ export class Flow {
    * Defines a node, or returns a builder for an existing one.
    * @remarks For a node the user deleted it returns a builder for the stored definition without
    * bringing the node back; only undo or `load()` restore it.
-   * @throws if `id` contains `.` (it separates the anchor) or `>` (it separates wire ends in keys).
+   * @throws if `id` contains `.` (it separates the anchor) or `>` (it separates wire ends in keys),
+   * or is `__proto__`, which as a key of `state().positions` would set the object's prototype.
    */
   node(id: string) {
     if (/[.>]/.test(id)) fail(`node id "${id}" must not contain "." or ">"`)
+    if (id === '__proto__') fail('node id "__proto__" is reserved')
     let def = this.graph.nodes.get(id) ?? this.graph.trash.get(id)
     if (!def) {
       def = { id, title: id, x: 0, y: 0 }
