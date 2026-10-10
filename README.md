@@ -274,7 +274,8 @@ f.set({ mode: 'edit', connect: false, remove: false })  // users may arrange, no
 | `canConnect` | allows all | `(from, to) => boolean`, asked before a wire the user draws or reconnects is made. |
 
 Options only limit users; calls from your code always work. Mounting or `set()` throws if `minZoom`
-ends up above `maxZoom`. Edit rights that are off show in a `data-lock` attribute on the root, e.g.
+ends up above `maxZoom`, a zoom is not a finite number above 0, or `history` is not a whole number
+of 0 or more. Edit rights that are off show in a `data-lock` attribute on the root, e.g.
 `data-lock="connect remove"`.
 
 ### Nodes: `f.node(id)`
@@ -308,7 +309,7 @@ stay deleted after a reload; only undo or `load()` bring them back.
 | `f.connect(from, to, { label, class })` | Adds a wire, optionally with a note and a CSS class. |
 | `f.disconnect(from, to)` | Removes a wire. |
 | `f.label(from, to, text?)` | Sets or removes the note on a wire. |
-| `f.wireClass(from, to, ...names)` | Sets the wire's CSS classes. |
+| `f.wireClass(from, to, ...names)` | Sets the wire's CSS classes; each name must be one class (not empty, no spaces). |
 
 Ends are `'nodeId.anchor'` or `'nodeId'`. String literals are checked at compile time, other strings
 at runtime.
@@ -320,7 +321,8 @@ at runtime.
 | `f.send(from, to, opts?)` | One packet to `to` over the fewest hops, picking each next wire as it goes. |
 | `f.send(from, undefined, opts?)` | A flow that splits along every outgoing wire, each wire once per send. |
 
-`opts` is `{ class?, speed? }`, speed in world px per second (default 240). The promise resolves
+`opts` is `{ class?, speed? }`: one CSS class, and a speed in world px per second above 0 (default
+240). The promise resolves
 with the nodes reached: `[to]` or `[]` for one packet, the end nodes for a flow.
 
 ### Selection

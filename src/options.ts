@@ -1,3 +1,5 @@
+import { fail } from './check'
+
 /** Behaviour switches for {@link flow} and {@link Flow.set}; every field is optional. */
 export interface FlowOptions {
   /**
@@ -103,12 +105,17 @@ const DEFAULTS: Settings = {
 
 /**
  * A copy of `base` with `options` applied, ignoring `mode` and fields set to `undefined`.
- * @throws if `minZoom` would end up above `maxZoom`.
+ * @throws if `minZoom` would end up above `maxZoom`, either is not a finite number above 0, or
+ * `history` is not a whole number of 0 or more.
  */
 export function settle(options: FlowOptions, base = DEFAULTS): Settings {
   const out = { ...base }
   const { mode: _, ...rest } = options
   for (const [key, value] of Object.entries(rest)) if (value !== undefined) Object.assign(out, { [key]: value })
-  if (out.minZoom > out.maxZoom) throw new Error(`betternodes: minZoom ${out.minZoom} is above maxZoom ${out.maxZoom}`)
+  const { minZoom, maxZoom, history } = out
+  // A zoom of 0 divides by zero when converting screen points; unbounded history grows without limit.
+  if (!(Number.isFinite(minZoom) && minZoom > 0 && Number.isFinite(maxZoom))) fail(`invalid zoom range ${minZoom}..${maxZoom}`)
+  if (minZoom > maxZoom) fail(`minZoom ${minZoom} is above maxZoom ${maxZoom}`)
+  if (!(Number.isInteger(history) && history >= 0)) fail(`invalid history ${history}`)
   return out
 }

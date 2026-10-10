@@ -80,6 +80,18 @@ test('fit: false keeps the first render at the origin and 100%', async () => {
   expect(el.querySelector('[data-node="a"]')!.getBoundingClientRect().left).toBe(500)
 })
 
+test.each([
+  ['a minZoom of 0', { minZoom: 0 }],
+  ['a negative minZoom', { minZoom: -1 }],
+  ['a NaN minZoom', { minZoom: NaN }],
+  ['an infinite maxZoom', { maxZoom: Infinity }],
+  ['a fractional history', { history: 1.5 }],
+  ['a negative history', { history: -1 }],
+  ['an unbounded history', { history: Infinity }],
+])('options reject %s', (_, options) => {
+  expect(() => flow(container(), options)).toThrow()
+})
+
 test('fit() never zooms below minZoom', async () => {
   const el = container()
   const f = flow(el, { minZoom: 0.8 })

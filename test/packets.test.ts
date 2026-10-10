@@ -309,3 +309,12 @@ describe('without WebGL', () => {
     expect(Math.max(...seen)).toBe(0)
   })
 })
+
+test('send() rejects a packet class that is not one class name, and a speed that never arrives', () => {
+  const f = flow(container())
+  f.node('a')
+  f.node('b')
+  f.connect('a', 'b')
+  expect(() => f.send('a', 'b', { class: 'a b' })).toThrow(/class/)
+  for (const speed of [0, -5, NaN, Infinity]) expect(() => f.send('a', 'b', { speed })).toThrow(/speed/)
+})

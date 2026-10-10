@@ -1,5 +1,5 @@
 import { GroupBuilder, NodeBuilder } from './builders'
-import { fail } from './check'
+import { checkClasses, fail } from './check'
 import { Graph } from './model/graph'
 import { History } from './model/history'
 import { diff, wireKey, type State } from './model/state'
@@ -107,9 +107,11 @@ export class Flow extends EventTarget {
    * Anchors: `nw n ne e se s sw w`.
    * @param options - `label` is a plain-text note shown halfway along the wire, `class` an extra
    * CSS class on it, see {@link Flow.wireClass}.
-   * @throws if an anchor doesn't exist, both sit on the same node, or the wire exists.
+   * @throws if an anchor doesn't exist, both sit on the same node, the wire exists, or `class` is
+   * not one class name.
    */
   connect<F extends string, T extends string>(from: End<F>, to: End<T>, options: { label?: string; class?: string } = {}) {
+    if (options.class) checkClasses([options.class])
     this.graph.connect(from, to)
     if (options.label) this.graph.label(from, to, options.label)
     if (options.class) this.graph.classify(from, to, [options.class])
@@ -136,9 +138,10 @@ export class Flow extends EventTarget {
    * `'bn-no-arrow'` arrowheads.
    * @remarks Like notes they belong to your code, survive deleting the wire, and move with a
    * wire end the user moves.
-   * @throws if there is no such wire.
+   * @throws if there is no such wire, or a name is not one class name (empty or with spaces).
    */
   wireClass<F extends string, T extends string>(from: End<F>, to: End<T>, ...names: string[]) {
+    checkClasses(names)
     this.wire(from, to)
     this.graph.classify(from, to, names)
     this.view.update()
@@ -280,10 +283,14 @@ export class Flow extends EventTarget {
    * to a node, so edits made meanwhile are respected; it resolves `[to]`, or `[]` if no route is
    * left. Without `to` it flows: copies follow every outgoing wire (each wire once per send) and it
    * resolves with the end nodes reached, those without outgoing wires. Emits no `change`.
-   * @throws if `from` or `to` is not a node.
+   * @throws if `from` or `to` is not a node, `class` is not one class name, or `speed` is not a
+   * finite number above 0.
    */
   send(from: string, to?: string, opts: SendOptions = {}) {
     this.known(to === undefined ? [from] : [from, to])
+    if (opts.class) checkClasses([opts.class])
+    // A packet that never arrives would keep frames running forever.
+    if (opts.speed !== undefined && !(Number.isFinite(opts.speed) && opts.speed > 0)) fail(`invalid packet speed ${opts.speed}`)
     return this.packets.send(from, to, opts)
   }
 

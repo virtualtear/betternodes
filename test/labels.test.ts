@@ -142,3 +142,15 @@ test('a note takes the longest inner stretch of its wire where it covers no node
   // Nowhere clear: back to the longest.
   expect(notePoint(points, () => false)).toEqual([100, 160])
 })
+
+test('wire classes must be single class names, so a bad one throws at the call instead of in every frame', async () => {
+  const { el, f } = await setup()
+  expect(() => f.wireClass('a.e', 'b.w', 'a b')).toThrow(/class/)
+  expect(() => f.wireClass('a.e', 'b.w', '')).toThrow(/class/)
+  f.node('c')
+  expect(() => f.connect('b.e', 'c.w', { class: 'x y' })).toThrow(/class/)
+  expect(f.state().edges).toEqual([['a.e', 'b.w']])
+  f.wireClass('a.e', 'b.w', 'error')
+  await frame()
+  expect(el.querySelector('[data-wire="a.e>b.w"]')!.classList.contains('error')).toBe(true)
+})
