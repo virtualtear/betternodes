@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest'
 import { Graph, type NodeDef } from '../src/model/graph'
+import type { State } from '../src/model/state'
 import { flow, type Flow } from '../src/index'
 import { layout } from '../src/layout/columns'
 import { untangle } from '../src/layout/untangle'
@@ -25,6 +26,7 @@ const gridRects = (n: number) => Array.from({ length: n }, (_, i): Rect => [...g
 interface Internals {
   view: { flush(now: number): void; viewport(x: number, y: number, k: number): void; place(id: string): void; dragging: Set<string>; x: number }
   graph: Graph
+  commit(before: State): void
 }
 const view = (f: Flow) => (f as unknown as Internals).view
 const graphOf = (f: Flow) => (f as unknown as Internals).graph
@@ -88,6 +90,34 @@ test('layout: 1000 new nodes', async () => {
     if (i) graph.connect(`n${Math.floor((i - 1) / 2)}`, `n${i}`) // a binary tree: wide columns
   }
   await measure('layout: 1000 new nodes (binary tree)', { budget: 5, run: () => layout(graph, sizes, 20) })
+})
+
+test('route: 10 wires across 1000 scattered nodes', async () => {
+  // Long wires over a dense, unaligned layout: the sparse grid gets a line per obstacle edge.
+  const rand = random(11)
+  const rects = Array.from({ length: 1000 }, (): Rect => [Math.round(rand() * 7000), Math.round(rand() * 4000), 160, 37])
+  await measure('route: 10 long wires across 1000 scattered nodes', {
+    runs: 3,
+    warmup: 1,
+    run: () => {
+      for (let i = 0; i < 10; i++) route([-200, i * 400], [1, 0], [7400, 4000 - i * 400], [-1, 0], rects)
+    },
+  })
+})
+
+test('remove: 1000 nodes at once', async () => {
+  const ids = Array.from({ length: 1000 }, (_, i) => `n${i}`)
+  await measure('remove: 1000 nodes at once (999 wires)', {
+    setup: () => {
+      const graph = new Graph()
+      for (const id of ids) graph.nodes.set(id, { id, title: '', x: 0, y: 0 } as NodeDef)
+      for (let i = 1; i < 1000; i++) graph.connect(`n${i - 1}`, `n${i}`)
+      return graph
+    },
+    run: graph => {
+      for (const id of ids) graph.remove(id)
+    },
+  })
 })
 
 test('untangle: overlap check when every node changed', async () => {
@@ -177,6 +207,23 @@ test('frames on a 1000-node graph', async () => {
   })
   f.select()
   view(f).dragging = new Set()
+  // Undo of a one-node move: only that node and its wires should need work.
+  const internals = f as unknown as Internals
+  await measure('frame: undo of a one-node move (1000 nodes)', {
+    budget: 100,
+    runs: 30,
+    setup: () => {
+      const before = f.state()
+      graphOf(f).nodes.get('n500')!.x += 40
+      view(f).place('n500')
+      frameNow(f)
+      internals.commit(before)
+    },
+    run: () => {
+      f.undo()
+      frameNow(f)
+    },
+  })
   await measure('frame: panning (1000 nodes)', {
     budget: 8,
     runs: 60,
@@ -188,6 +235,29 @@ test('frames on a 1000-node graph', async () => {
   for (let i = 0; i < 200; i++) void f.send(`n${i * 5}`, `n${i * 5 + 3}`, { speed: 1 })
   frameNow(f)
   await measure('frame: 200 packets in flight (1000 nodes)', { budget: 8, runs: 60, run: () => frameNow(f) })
+  f.destroy()
+  el.remove()
+})
+
+// Wire notes are placed clear of nodes, which checks node rects for every candidate spot.
+test('frames with 200 labelled wires', async () => {
+  const { el, f } = mount(1000)
+  for (let i = 1; i < 1000; i += 5) if (i % COLS) f.label(`n${i - 1}.e`, `n${i}.w`, `step ${i}`)
+  frameNow(f)
+  frameNow(f)
+  let step = 0
+  const dragged = graphOf(f).nodes.get('n500')!
+  await measure('frame: dragging one node, 200 labelled wires (1000 nodes)', {
+    budget: 8,
+    runs: 60,
+    run: () => {
+      view(f).dragging = new Set(['n500'])
+      dragged.x = gridAt(500)[0] + (++step % 10) * 20
+      dragged.y = gridAt(500)[1] + 60
+      view(f).place('n500')
+      frameNow(f)
+    },
+  })
   f.destroy()
   el.remove()
 })
