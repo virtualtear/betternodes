@@ -183,7 +183,7 @@ test('load() ignores a saved state of the wrong shape and keeps every wire', () 
 test('at(), viewport() and zoomBy() reject numbers that are not finite or too far out', () => {
   const f = flow(container())
   expect(() => f.node('a').at(Infinity, 0)).toThrow()
-  expect(() => f.node('a').at(0, 1e8)).toThrow()
+  expect(() => f.node('a').at(0, 1e10)).toThrow()
   expect(() => f.viewport({ x: NaN })).toThrow()
   expect(() => f.viewport({ zoom: 0 })).toThrow()
   expect(() => f.zoomBy(-1)).toThrow()

@@ -1,17 +1,17 @@
 /** A point or vector in world px. */
 export type Point = [x: number, y: number]
 
-/** Axis-aligned rectangle in world px. */
-export type Rect = [x: number, y: number, w: number, h: number]
+/** Axis-aligned rectangle in world px; read-only, since cached rects are shared. */
+export type Rect = readonly [x: number, y: number, w: number, h: number]
 
 /** Grid spacing in world px: background dots, node snapping and auto-layout all use it. */
 export const GRID = 20
 
 /**
  * Largest distance from the origin a node may be placed at, in world px. Bounds the grid math of
- * routing and spatial lookups; dragging there would take half an hour of edge panning.
+ * routing and spatial lookups, and leaves room for auto-layouts of very large graphs.
  */
-export const WORLD = 1e7
+export const WORLD = 1e9
 
 /** Room a group frame leaves around its members: on the sides and bottom, and on top for its title. */
 export const FRAME = { side: GRID, top: 2 * GRID }

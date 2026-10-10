@@ -1,3 +1,4 @@
+import { Buckets } from '../geometry/buckets'
 import { GRID, clamp, fitInto, frameAround, union, type Point, type Rect } from '../geometry/rect'
 import { reach, route } from '../geometry/route'
 import { curve } from '../geometry/svg-path'
@@ -40,6 +41,10 @@ export class View {
   onViewport?: () => void
   /** Set by {@link View.destroy}; a destroyed view runs no more frames. */
   destroyed = false
+  /** Each node's rect as of the last frame, the same rects {@link View.index} holds. */
+  readonly rects = new Map<string, Rect>()
+  /** Spatial index of {@link View.rects}, by node id, kept up to date frame by frame. */
+  readonly index = new Buckets<string>()
 
   private readonly world = h('div', 'bn-world')
   private readonly svg = svg('svg', 'bn-wires')
@@ -61,6 +66,8 @@ export class View {
   private readonly dirty = new Set<string>()
   private readonly moved = new Set<string>()
   private readonly stale = new Set<string>()
+  // This frame's nodes whose rect changed, with the rect they had before; undefined for new ones.
+  private readonly shifted = new Map<string, Rect | undefined>()
   private readonly resize = new ResizeObserver(entries => {
     for (const e of entries) this.stale.add((e.target as HTMLElement).dataset.node!)
     this.update()
@@ -84,7 +91,7 @@ export class View {
     // Focusable, so a click inside it lets Delete and Escape reach its keydown listener.
     this.tabbed = !root.hasAttribute('tabindex')
     if (this.tabbed) root.tabIndex = -1
-    this.wires = new Wires(graph, this.notes, id => this.box(id), (from, to, near) => this.wire(from, to, near))
+    this.wires = new Wires(graph, this.notes, this.rects, this.index, (from, to, near) => this.wire(from, to, near))
     this.groups = new Groups(graph, this.svg)
     this.svg.append(arrowDefs(), this.notes, this.preview, this.packets)
     this.world.append(this.svg)
@@ -112,7 +119,13 @@ export class View {
 
   /** Removes a deleted node's element; its wires disappear with the next frame's reconcile. */
   drop(id: string) {
-    this.wires.free(id)
+    const rect = this.rects.get(id)
+    if (rect) {
+      this.index.remove(rect, id)
+      this.rects.delete(id)
+      this.wires.free(rect)
+    }
+    this.shifted.delete(id)
     const el = this.els.get(id)
     if (el) {
       this.resize.unobserve(el)
@@ -272,6 +285,7 @@ export class View {
     for (const id of this.stale) if (this.measure(id)) this.moved.add(id)
     // Unplaced nodes are always stale: node() and relayout() both mark them.
     if (this.stale.size) this.autoLayout()
+    for (const id of this.moved) this.sync(id)
     this.pullApart()
     if (this.regroup || this.moved.size) {
       this.regroup = false
@@ -280,11 +294,12 @@ export class View {
     const fitted = this.fitting && this.fitAll()
     this.toggleMinimap()
     this.mini?.render(this.moved, this.panned || fitted)
-    this.wires.render(this.moved, this.dragging)
+    this.wires.render(this.shifted, this.dragging)
     this.renderOverlays()
     this.dirty.clear()
     this.moved.clear()
     this.stale.clear()
+    this.shifted.clear()
     if (this.panned || fitted) this.onViewport?.()
     this.panned = false
     this.onFrame?.(now)
@@ -306,13 +321,28 @@ export class View {
     }
   }
 
+  // Brings the cached rect and the index in line with the node, remembering the old rect for this
+  // frame's wire work.
+  private sync(id: string) {
+    const n = this.graph.nodes.get(id)!
+    const [w, h] = this.sizes.get(id) ?? UNMEASURED
+    const old = this.rects.get(id)
+    if (old && old[0] === n.x && old[1] === n.y && old[2] === w && old[3] === h) return
+    const rect: Rect = [n.x, n.y, w, h]
+    if (old) this.index.move(old, rect, id)
+    else this.index.add(rect, id)
+    this.rects.set(id, rect)
+    if (!this.shifted.has(id)) this.shifted.set(id, old)
+  }
+
   // Pulls apart nodes that code, a saved state or growing content put on top of each other.
   private pullApart() {
-    if ([...this.moved].every(id => this.dragging.has(id))) return
-    const ids = [...this.graph.nodes.keys()]
-    const rects = new Map(ids.map(id => [id, this.box(id)]))
-    for (const [id, [x, y]] of untangle(ids, rects, this.moved, GRID, GRID, this.dragging)) {
+    const changed = [...this.moved].filter(id => !this.dragging.has(id))
+    if (!changed.length) return
+    const rank = (id: string) => this.graph.nodes.get(id)!.seq
+    for (const [id, [x, y]] of untangle(changed, this.rects, this.index, rank, GRID, GRID, this.dragging)) {
       this.move(this.graph.nodes.get(id)!, x, y)
+      this.sync(id)
     }
   }
 

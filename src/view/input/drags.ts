@@ -1,4 +1,4 @@
-import { GRID, bounds, overlap, snap, type Rect } from '../../geometry/rect'
+import { GRID, bounds, snap, type Rect } from '../../geometry/rect'
 import { freeSpots } from '../../layout/untangle'
 import type { NodeDef } from '../../model/graph'
 import { Journal } from '../../model/history'
@@ -103,16 +103,24 @@ export function land({ view, graph, ops }: Input, nodes: NodeDef[], journal: Jou
   const moved = new Set(nodes.map(n => n.id))
   const [members, frames] = [graph.members(), view.frames()]
   const units: { ids: string[]; rect: Rect }[] = []
-  const others: Rect[] = []
+  const still: Rect[] = []
   for (const [g, ids] of members) {
     const count = ids.filter(id => moved.has(id)).length
     if (count === ids.length) units.push({ ids, rect: frames.get(g)! })
-    else if (!count) others.push(frames.get(g)!)
+    else if (!count) still.push(frames.get(g)!)
   }
   const whole = new Set(units.flatMap(u => u.ids))
   for (const id of moved) if (!whole.has(id)) units.push({ ids: [id], rect: view.box(id) })
-  for (const id of graph.nodes.keys()) if (!moved.has(id)) others.push(view.box(id))
-  freeSpots(units.map(u => u.rect), others, GRID, GRID).forEach(([x, y], i) => {
+  // Taken: the node index without the moved nodes, plus the frames of groups that kept still.
+  // '.' tags those frames, since no node id contains it.
+  const { index, rects } = view
+  const lifted = [...moved].flatMap(id => (rects.has(id) ? [[id, rects.get(id)!] as const] : []))
+  for (const [id, r] of lifted) index.remove(r, id)
+  for (const r of still) index.add(r, '.')
+  const spots = freeSpots(units.map(u => u.rect), index, GRID, GRID)
+  for (const r of still) index.remove(r, '.')
+  for (const [id, r] of lifted) index.add(r, id)
+  spots.forEach(([x, y], i) => {
     const { ids, rect } = units[i]
     const [dx, dy] = [x - rect[0], y - rect[1]]
     for (const id of ids) {
@@ -125,7 +133,7 @@ export function land({ view, graph, ops }: Input, nodes: NodeDef[], journal: Jou
 }
 
 /** Draws a selection box; on release, adds every node it touches to the selection. */
-export function marquee({ view, graph, signal }: Input, press: PointerEvent) {
+export function marquee({ view, signal }: Input, press: PointerEvent) {
   const start = view.toWorld(press.clientX, press.clientY)
   let box: Rect | undefined
   gesture(e => {
@@ -135,8 +143,9 @@ export function marquee({ view, graph, signal }: Input, press: PointerEvent) {
     view.marquee()
     const area = box
     if (e.type !== 'pointerup' || !area) return
-    const hits = [...graph.nodes.keys()].filter(id => overlap(view.box(id), area))
-    view.select([...view.selected.nodes, ...hits])
+    const hits = new Set(view.selected.nodes)
+    view.index.near(area, id => hits.add(id))
+    view.select(hits)
   }, signal)
 }
 

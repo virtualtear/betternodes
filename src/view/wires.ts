@@ -23,35 +23,6 @@ export function notePoint(points: Point[], fits: (at: Point) => boolean): Point 
   return (mids.find(([, mid]) => fits(mid)) ?? mids[0])[1]
 }
 
-// Lookups a frame needs before a spatial hash of the nodes pays for itself. Measured in Chromium at
-// 5000 nodes: a build, with the garbage collection it causes, costs about 1.5 ms, the time of some
-// 32 scans over every node. So mounts, loads and big group drags get a hash, small drags don't.
-// ponytail: rebuilt per frame; keep one across frames if drags of 5000+ nodes need the last ms.
-const HASH_AFTER = 32
-
-// The node rects that may block something in an area, for one frame. Hits may repeat, and without
-// a hash they are every node, which callers filter themselves.
-class Obstacles {
-  private all?: Rect[]
-  private index?: Buckets<Rect>
-
-  constructor(private readonly rects: Map<string, Rect>) {}
-
-  // Announces `count` lookups to come, so the hash is built up front only when they pay for it.
-  expect(count: number) {
-    if (count <= HASH_AFTER || this.index) return
-    this.index = new Buckets<Rect>()
-    for (const r of this.rects.values()) this.index.add(r, r)
-  }
-
-  readonly near = (area: Rect): Rect[] => {
-    if (!this.index) return (this.all ??= [...this.rects.values()])
-    const hits: Rect[] = []
-    this.index.near(area, r => hits.push(r))
-    return hits
-  }
-}
-
 const same = (a: Point[] | undefined, b: Point[]) =>
   a === b || (a?.length === b.length && a.every((p, i) => p[0] === b[i][0] && p[1] === b[i][1]))
 
@@ -59,12 +30,12 @@ const same = (a: Point[] | undefined, b: Point[]) =>
 export class Wires {
   // One <g data-wire> per wire: a visible path plus a wide transparent one to grab it by.
   private readonly groups = new Map<WireKey, SVGGElement>()
-  // Each wire's routed bounding box, and every node's rect as of the last render: together they
-  // tell which wires a moving node may now block or free.
+  // Each wire's routed bounding box: it tells which wires a moving node may now block or free.
   private readonly boxes = new Map<WireKey, Rect>()
-  private rects = new Map<string, Rect>()
   // Spots of nodes removed since the last render: wires that went around them can straighten out.
   private readonly freed: Rect[] = []
+  // Wires moved along with a dragged group instead of routed; routed again once it is dropped.
+  private readonly carried = new Set<WireKey>()
   // Waypoints per wire, before and after lane separation.
   private readonly routes = new Map<WireKey, Point[]>()
   private drawn = new Map<WireKey, Point[]>()
@@ -79,15 +50,23 @@ export class Wires {
   /**
    * @param layer - holds the notes; wire groups go right before it, so notes are drawn over every
    * wire and no other wire's grab area covers them.
-   * @param box - a node's current rect in world px.
+   * @param rects - every node's current rect in world px, and `index` the same by area.
    * @param route - waypoints for a wire between two refs, around the nodes `near` finds in an area.
    */
   constructor(
     private readonly graph: Graph,
     private readonly layer: SVGGElement,
-    private readonly box: (id: string) => Rect,
+    private readonly rects: ReadonlyMap<string, Rect>,
+    private readonly index: Buckets<string>,
     private readonly route: (from: string, to: string, near: (area: Rect) => Rect[]) => Point[],
   ) {}
+
+  // The node rects in an area; may repeat one.
+  private readonly near = (area: Rect) => {
+    const hits: Rect[] = []
+    this.index.near(area, (_, r) => hits.push(r))
+    return hits
+  }
 
   /** A drawn wire's elements: its `<g data-wire>` group, plus its note if it has one. */
   parts(key: WireKey) {
@@ -103,40 +82,35 @@ export class Wires {
   }
 
   /** Remembers where a removed node was, so wires that went around it get re-routed. */
-  free(id: string) {
-    const rect = this.rects.get(id)
-    if (rect) this.freed.push(rect)
+  free(rect: Rect) {
+    this.freed.push(rect)
   }
 
   /**
-   * Adds and removes wire elements to match the graph and re-routes wires near `touched` nodes.
+   * Adds and removes wire elements to match the graph and re-routes wires near nodes whose rect changed.
+   * @param shifted - those nodes, each with its rect before the change; undefined for new ones.
    * @param rigid - nodes dragged together. Wires between two of them move along with the group
    * instead of re-routing, until a render without them, e.g. on the drop.
    */
   // ponytail: checks every wire against the moved spots, so a drag frame takes about 2 ms at 5000
   // nodes; index the wire boxes by area if graphs grow well past that.
-  render(touched: Set<string>, rigid: ReadonlySet<string> = new Set()) {
+  render(shifted: ReadonlyMap<string, Rect | undefined>, rigid: ReadonlySet<string> = new Set()) {
     // Wires, notes and classes only appear or go with a version bump; moves alone keep it.
     const changed = this.seen !== this.graph.version
-    // Idle frames (panning, packets) skip the per-node and per-wire scans entirely.
-    if (!touched.size && !this.freed.length && !changed) return
+    // Idle frames (panning, packets) skip the per-wire scan entirely, unless a group drag just ended.
+    if (!shifted.size && !this.freed.length && !changed && (!this.carried.size || rigid.size)) return
     this.seen = this.graph.version
-    const now = new Map<string, Rect>()
-    for (const id of this.graph.nodes.keys()) now.set(id, this.box(id))
     // Old and new spots of every node that moved or resized: wires passing there need a new route.
     // Bucketed, so dragging a group doesn't compare every wire with every spot.
     const spots = new Buckets<null>()
     for (const r of this.freed.splice(0)) spots.add(r, null)
-    for (const id of touched) {
-      const old = this.rects.get(id)
+    for (const [id, old] of shifted) {
       if (old) spots.add(old, null)
-      spots.add(now.get(id)!, null)
+      spots.add(this.rects.get(id)!, null)
     }
-    const last = this.rects
-    this.rects = now
     // Undefined if the node is new or changed size.
     const shift = (id: string): Point | undefined => {
-      const [a, b] = [last.get(id), now.get(id)!]
+      const [a, b] = [shifted.get(id), this.rects.get(id)!]
       return a && a[2] === b[2] && a[3] === b[3] ? [b[0] - a[0], b[1] - a[1]] : undefined
     }
     let rerouted = false
@@ -152,28 +126,28 @@ export class Wires {
     for (const [key, [from, to]] of this.graph.edges) {
       const [f, t] = [nodeOf(from), nodeOf(to)]
       if (!this.groups.has(key)) this.create(key)
-      else if (!touched.has(f) && !touched.has(t) && spots.empty(inflate(this.boxes.get(key)!, CLEAR))) continue
+      else if (!shifted.has(f) && !shifted.has(t) && !this.carried.has(key) && spots.empty(inflate(this.boxes.get(key)!, CLEAR))) continue
       else if (rigid.has(f) && rigid.has(t)) {
         // Both ends moved by the same offset: shift the route along instead of searching a new one.
         const [d, e] = [shift(f), shift(t)]
         if (d && e && d[0] === e[0] && d[1] === e[1]) {
           if (!d[0] && !d[1]) continue
           this.translate(key, d)
+          this.carried.add(key)
           rerouted = true
           continue
         }
       }
       pending.push([key, from, to])
+      this.carried.delete(key)
     }
-    const obstacles = new Obstacles(now)
-    obstacles.expect(pending.length)
     for (const [key, from, to] of pending) {
-      const points = this.route(from, to, obstacles.near)
+      const points = this.route(from, to, this.near)
       this.boxes.set(key, bounds(points))
       this.routes.set(key, points)
     }
     const redrawn = rerouted || pending.length ? this.redraw() : new Set<WireKey>()
-    this.renderNotes(redrawn, spots, obstacles)
+    this.renderNotes(redrawn, spots)
     if (changed) this.renderClasses()
   }
 
@@ -188,6 +162,7 @@ export class Wires {
   private forget(key: WireKey) {
     this.groups.get(key)?.remove()
     this.notes.get(key)?.remove()
+    this.carried.delete(key)
     for (const map of [this.groups, this.boxes, this.routes, this.notes, this.tracks]) map.delete(key)
   }
 
@@ -231,7 +206,7 @@ export class Wires {
 
   // A note moves only when it is new, its text changed, its wire was redrawn, or a node moved or
   // went near it (`spots`), since its spot depends on nothing else.
-  private renderNotes(redrawn: ReadonlySet<WireKey>, spots: Buckets<null>, obstacles: Obstacles) {
+  private renderNotes(redrawn: ReadonlySet<WireKey>, spots: Buckets<null>) {
     for (const [key, note] of this.notes) {
       if (this.graph.labels.has(key)) continue
       note.remove()
@@ -259,13 +234,8 @@ export class Wires {
       if (!newText && !redrawn.has(key) && spots.empty(inflate(this.boxes.get(key)!, w / 2 + 16))) continue
       due.push([key, note, w])
     }
-    obstacles.expect(due.length)
     for (const [key, note, w] of due) {
-      const fits = ([cx, cy]: Point) => {
-        const box: Rect = [cx - w / 2, cy - 8, w, 16]
-        for (const r of obstacles.near(box)) if (overlap(r, box)) return false
-        return true
-      }
+      const fits = ([cx, cy]: Point) => this.index.empty([cx - w / 2, cy - 8, w, 16])
       const [x, y] = notePoint(this.drawn.get(key)!, fits)
       setAttrs(note, { x, y })
     }

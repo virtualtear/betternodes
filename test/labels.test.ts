@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest'
+import { Buckets } from '../src/geometry/buckets'
 import type { Point, Rect } from '../src/geometry/rect'
 import { flow } from '../src/index'
 import { Graph } from '../src/model/graph'
@@ -164,16 +165,19 @@ test('a node coming near a note moves it, even when the wire keeps its route', (
   graph.connect('a', 'b')
   graph.label('a', 'b', 'a long label text')
   const rects = new Map<string, Rect>([['a', [-100, -10, 100, 20]], ['b', [110, 140, 100, 20]]])
+  const index = new Buckets<string>()
+  for (const [id, r] of rects) index.add(r, id)
   // Its longest inner segment is the vertical one at x 100, just inside the wire's right edge.
   const points: Point[] = [[0, 0], [10, 0], [10, -50], [100, -50], [100, 150], [110, 150]]
   const layer = svg('g')
-  const wires = new Wires(graph, layer, id => rects.get(id)!, () => points)
+  const wires = new Wires(graph, layer, rects, index, () => points)
   const spot = () => ['x', 'y'].map(name => Number(layer.querySelector('.bn-label')!.getAttribute(name)))
-  wires.render(new Set(['a', 'b']))
+  wires.render(new Map([['a', undefined], ['b', undefined]]))
   expect(spot()).toEqual([100, 50])
   // Too far from the wire to re-route it, but on the note's right half.
   graph.add('c')
   rects.set('c', [125, 40, 30, 20])
-  wires.render(new Set(['c']))
+  index.add(rects.get('c')!, 'c')
+  wires.render(new Map([['c', undefined]]))
   expect(spot()).toEqual([55, -50])
 })

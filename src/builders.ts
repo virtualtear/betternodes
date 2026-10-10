@@ -14,7 +14,7 @@ export class NodeBuilder {
 
   /**
    * Places the node's top-left corner at world coordinates.
-   * @throws if a coordinate is not a number within ±10,000,000.
+   * @throws if a coordinate is not a number within ±1,000,000,000.
    */
   at(x: number, y: number) {
     if (!(Math.abs(x) <= WORLD && Math.abs(y) <= WORLD)) fail(`position ${x}, ${y} is not within ±${WORLD}`)

@@ -4,6 +4,7 @@ import { Journal } from '../src/model/history'
 import { flow, type Flow } from '../src/index'
 import { layout } from '../src/layout/columns'
 import { untangle } from '../src/layout/untangle'
+import { Buckets } from '../src/geometry/buckets'
 import { separate } from '../src/geometry/lanes'
 import type { Point, Rect } from '../src/geometry/rect'
 import { route } from '../src/geometry/route'
@@ -122,16 +123,25 @@ test('remove: 1000 nodes at once', async () => {
   })
 })
 
+// The view keeps the node index from frame to frame, so it is built outside the timed runs.
+function indexed(rects: Map<string, Rect>) {
+  const index = new Buckets<string>()
+  for (const [id, r] of rects) index.add(r, id)
+  const order = [...rects.keys()]
+  const rank = new Map(order.map((id, i) => [id, i]))
+  return { index, order, rank: (id: string) => rank.get(id)! }
+}
+
 test('untangle: overlap check when every node changed', async () => {
   const rects = new Map(gridRects(1000).map((r, i) => [`n${i}`, r]))
-  const order = [...rects.keys()]
-  await measure('untangle: 1000 nodes, no overlaps', { budget: 5, run: () => untangle(order, rects, new Set(order), 20, 20) })
+  const { index, order, rank } = indexed(rects)
+  await measure('untangle: 1000 nodes, no overlaps', { budget: 5, run: () => untangle(order, rects, index, rank, 20, 20) })
 })
 
 test('untangle: many nodes stacked on one spot', async () => {
   const rects = new Map(Array.from({ length: 300 }, (_, i) => [`n${i}`, [0, 0, 160, 37] as Rect]))
-  const order = [...rects.keys()]
-  await measure('untangle: 300 nodes stacked on one spot', { budget: 400, runs: 5, warmup: 1, run: () => untangle(order, rects, new Set(order), 20, 20) })
+  const { index, order, rank } = indexed(rects)
+  await measure('untangle: 300 nodes stacked on one spot', { budget: 400, runs: 5, warmup: 1, run: () => untangle(order, rects, index, rank, 20, 20) })
 })
 
 test('first frame: mount 1000 nodes and 970 wires', async () => {
