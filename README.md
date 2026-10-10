@@ -487,17 +487,20 @@ budget; 60 fps means no frame was missed.
 
 | Scenario | Median | Budget |
 | --- | --- | --- |
-| Mount 1000 nodes and 970 wires | 153 ms | 500 ms |
-| Frame while dragging a node, 1000 nodes | 1 ms | 8 ms |
-| Frame while dragging 100 nodes, 1000 nodes | 1.6 ms | 8 ms |
-| Same, minimap on | 4.8 ms | 8 ms |
-| Frame while dragging all 1000 nodes | 4.4 ms | 8 ms |
+| Mount 1000 nodes and 970 wires | 137 ms | 500 ms |
+| Frame while dragging a node, 1000 nodes | 0.7 ms | 8 ms |
+| Frame while dragging 100 nodes, 1000 nodes | 1.2 ms | 8 ms |
+| Same, minimap on | 4.2 ms | 8 ms |
+| Frame while dragging all 1000 nodes | 3 ms | 8 ms |
+| Frame after undoing a move, 1000 nodes | 2.8 ms | 10 ms |
 | Frame while panning, 1000 nodes | < 0.1 ms | 8 ms |
 | Frame with 1000 packets on bent wires | 0.2 ms | 8 ms |
-| Route 1000 short wires | 11.5 ms | 50 ms |
-| Route 300 long wires among 200 nodes (worst case) | 172 ms | 600 ms |
+| Route 1000 short wires | 12.1 ms | 50 ms |
+| Route 300 long wires among 200 nodes (worst case) | 94 ms | 600 ms |
+| Route 10 long wires across 1000 scattered nodes | 90 ms | 300 ms |
+| Remove 1000 nodes at once | 0.2 ms | 2 ms |
 | Auto-layout 1000 nodes | 0.5 ms | 5 ms |
-| Pull apart 300 nodes stacked on one spot | 84 ms | 400 ms |
+| Pull apart 300 nodes stacked on one spot | 85 ms | 400 ms |
 | Frame rate while dragging or panning, 1000 nodes | 60 fps | 30 fps |
 | Frame rate with 2000 packets in flight | 60 fps | 30 fps |
 
